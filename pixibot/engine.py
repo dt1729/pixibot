@@ -13,7 +13,10 @@ from typing import Callable, Optional
 from . import observer, orchestrator, tpm
 from .blackboard import KIND_DIRECTIVE, Blackboard
 from .context_manager import ContextManager
+from .logbook import get as _get_logger
 from .model import Model
+
+_log = _get_logger("engine")
 
 ModelFactory = Callable[[dict], Model]
 
@@ -68,8 +71,12 @@ class Engine:
         self.bb.reset_run(run_id)
         base = self.workspace_base or os.path.expanduser("~/pixibot-workspace")
         self.workspace = Workspace(os.path.join(base, run_id))
+        _log.info("BUILD start run=%s objective=%r ws=%s",
+                  run_id, inp.get("objective"), self.workspace.root)
 
         self.projection = tpm.plan(inp, self.tpm_model)
+        _log.info("BUILD run=%s agents=%s", run_id,
+                  [a["id"] for a in self.projection.get("agents", [])])
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
@@ -77,6 +84,8 @@ class Engine:
                                  self.model_factory, self.workspace, self.on_event)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
+        _log.info("BUILD done run=%s steps=%d files=%d",
+                  run_id, steps, len(self.workspace.list_files()))
         return {"projection": self.projection, "steps": steps,
                 "workspace": self.workspace.root, "run_id": run_id}
 

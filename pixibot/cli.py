@@ -403,7 +403,11 @@ def main(argv=None) -> None:
     ap.add_argument("--objective", help="one-shot: build this, then drop into the shell")
     ap.add_argument("--tui", action="store_true", help="force the split-pane TUI")
     ap.add_argument("--plain", action="store_true", help="force the plain shell (no TUI)")
+    ap.add_argument("--log", help="path to the run log (default ~/.pixibot/pixibot.log)")
     args = ap.parse_args(argv)
+
+    from . import logbook
+    log_path = logbook.setup(args.log)
 
     # Arrow-key history + line editing (up/down recalls commands, left/right edits).
     try:
@@ -433,7 +437,7 @@ def main(argv=None) -> None:
         except ImportError:
             run_tui = None
         if run_tui is not None:
-            run_tui(session, label)
+            run_tui(session, label, log_path)
             bb.close()
             return
         print("(install `textual` for the split-pane view: pip install textual — using plain shell)")
@@ -445,6 +449,7 @@ def main(argv=None) -> None:
     print(console.banner())
     print(console.c(f"provider: {label}   ·   'help' for commands  ·  ↑/↓ history  ·  'exit' to leave", "dim"))
     print(console.c(f"workspace: {workspace.root}", "dim"))
+    print(console.c(f"run log: {log_path}", "dim"))
 
     def run_line(line: str) -> bool:
         s = line.strip()

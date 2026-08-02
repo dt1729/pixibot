@@ -13,6 +13,9 @@ from __future__ import annotations
 from typing import Optional
 
 from .blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
+from .logbook import get as _get_logger
+
+_log = _get_logger("agent")
 from .context_manager import STATE_DONE
 from .model import Model, ModelResponse
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
@@ -113,10 +116,17 @@ class ReasoningAgent:
         """Run model→tool turns until the model stops calling tools or `iters` runs out.
         Returns the model's last non-empty text (the agent's own summary)."""
         last_text = ""
-        for _ in range(iters):
-            resp = self.model.generate(
-                system=self.system_prompt, messages=messages, tools=self.tool_defs
-            )
+        for i in range(iters):
+            try:
+                resp = self.model.generate(
+                    system=self.system_prompt, messages=messages, tools=self.tool_defs
+                )
+            except Exception:
+                _log.exception("%s: model.generate failed on turn %d", self.agent_id, i + 1)
+                raise
+            _log.info("%s turn %d: stop=%s tools=%d text=%dc think=%dc",
+                      self.agent_id, i + 1, resp.stop_reason, len(resp.tool_calls),
+                      len(resp.text), len(getattr(resp, "thinking", "")))
             if getattr(resp, "thinking", "").strip():
                 self._emit("think", resp.thinking.strip())
                 self._log_thinking(bb, resp.thinking.strip())
@@ -130,10 +140,14 @@ class ReasoningAgent:
                 return last_text
             results = []
             for tc in resp.tool_calls:
+                out = self._run_tool(tc, bb)
+                first = out.splitlines()[0][:140] if out else ""
+                _log.info("%s tool %s(%s) -> %s",
+                          self.agent_id, tc.name, self._tool_summary(tc.input), first)
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": tc.id,
-                    "content": self._run_tool(tc, bb),
+                    "content": out,
                 })
             messages.append({"role": "user", "content": results})
         return last_text

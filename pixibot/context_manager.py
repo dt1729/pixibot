@@ -17,6 +17,9 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from .blackboard import KIND_ARTIFACT, Blackboard, Event
+from .logbook import get as _get_logger
+
+_log = _get_logger("cm")
 
 # runner(bb, agent_id, events) -> terminal lifecycle state (defaults to DONE)
 AgentRunner = Callable[[Blackboard, str, list[Event]], Optional[str]]
@@ -89,14 +92,20 @@ class ContextManager:
             activated += 1
             since = self.bb.latest_event_id()
             self.bb.set_state(agent_id, STATE_ACTIVE)
+            _log.info("activate %s (inbox=%d)", agent_id, len(events))
             if self.on_agent_start:
                 self.on_agent_start(agent_id)
-            terminal = runner(self.bb, agent_id, events) or STATE_DONE
+            try:
+                terminal = runner(self.bb, agent_id, events) or STATE_DONE
+            except Exception:  # a crashing agent must not hang or kill the whole run
+                _log.exception("runner for %s crashed", agent_id)
+                terminal = STATE_BLOCKED
             self.bb.set_state(agent_id, terminal)
             self._route_new_artifacts(agent_id, since)
+            wrote = [e.section for e in self.bb.history(from_agent=agent_id)
+                     if e.kind == KIND_ARTIFACT and e.id > since]
+            _log.info("done %s -> %s wrote=%s", agent_id, terminal, wrote or "(nothing)")
             if self.on_activation:
-                wrote = [e.section for e in self.bb.history(from_agent=agent_id)
-                         if e.kind == KIND_ARTIFACT and e.id > since]
                 self.on_activation(agent_id, terminal, wrote)
             if terminal == STATE_DONE:
                 self._done.add(agent_id)

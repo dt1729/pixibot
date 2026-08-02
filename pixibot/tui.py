@@ -41,10 +41,11 @@ class PixibotApp(App):
     """
     BINDINGS = [("ctrl+c", "quit", "Quit"), ("ctrl+d", "quit", "Quit")]
 
-    def __init__(self, session: ChatSession, label: str):
+    def __init__(self, session: ChatSession, label: str, log_path: str = ""):
         super().__init__()
         self.session = session
         self.label = label
+        self.log_path = log_path
         self.build_title = "(no build yet)"
         self.agent_order: list[str] = []
         self.agent_states: dict[str, str] = {}
@@ -61,6 +62,8 @@ class PixibotApp(App):
     def on_mount(self) -> None:
         self._shell(f"[b magenta]Pixibot[/]  ·  provider: {self.label}")
         self._shell("Builds run in the background — watch the right panes. 'help' for commands.")
+        if self.log_path:
+            self._shell(f"[dim]run log: {self.log_path}[/]")
         self.query_one("#cmd", Input).focus()
 
     # ── pane helpers (main thread only) ─────────────────────────────────────
@@ -187,5 +190,5 @@ class PixibotApp(App):
             self.call_from_thread(self._shell, f"[red]build failed:[/] {exc}")
 
 
-def run_tui(session: ChatSession, label: str) -> None:
-    PixibotApp(session, label).run()
+def run_tui(session: ChatSession, label: str, log_path: str = "") -> None:
+    PixibotApp(session, label, log_path).run()
