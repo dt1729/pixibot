@@ -31,7 +31,7 @@ class ReasoningAgent:
         reads: tuple[str, ...] = (),
         tool_defs: Optional[list[dict]] = None,
         tool_impls: Optional[dict] = None,
-        max_iters: int = 8,
+        max_iters: int = 14,
         workspace=None,
         on_event=None,
     ):
@@ -89,11 +89,28 @@ class ReasoningAgent:
     # roles whose turn is worthless unless they leave a file behind
     _PRODUCER_ROLES = ("topology", "lld", "programmer", "tester")
 
+    _NUDGE = ("You are about to end your turn without creating any file in the workspace. "
+              "Your role's deliverable IS a file. The workspace being empty is normal — YOU "
+              "create the initial files. Stop exploring and write your deliverable NOW with "
+              "write_artifact(section=<path>, content=<full file contents>). Do not just "
+              "describe it.")
+
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
         before = self.workspace.snapshot() if self.workspace is not None else None
         messages = self._initial_messages(bb, events)
-        nudged = False
-        for _ in range(self.max_iters):
+        self._tool_loop(bb, messages, self.max_iters)
+        # Guarantee delivery: if a producing role wrote nothing — whether it stopped
+        # early OR ran out of iterations exploring — force one dedicated delivery pass.
+        if self._needs_nudge(before):
+            messages.append({"role": "user", "content": self._NUDGE})
+            self._emit("say", "(nudged: no file produced — forcing deliverable)")
+            self._tool_loop(bb, messages, max(4, self.max_iters // 2))
+        self._log_file_changes(bb, before)
+        return STATE_DONE
+
+    def _tool_loop(self, bb: Blackboard, messages: list[dict], iters: int) -> None:
+        """Run model→tool turns until the model stops calling tools or `iters` runs out."""
+        for _ in range(iters):
             resp = self.model.generate(
                 system=self.system_prompt, messages=messages, tools=self.tool_defs
             )
@@ -103,17 +120,7 @@ class ReasoningAgent:
                 self._emit("tool", f"{tc.name}({self._tool_summary(tc.input)})")
             messages.append({"role": "assistant", "content": self._assistant_content(resp)})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
-                if self._needs_nudge(before, nudged):
-                    nudged = True
-                    messages.append({"role": "user", "content":
-                        "You are about to end your turn without creating any file in the "
-                        "workspace. Your role's deliverable IS a file. The workspace being "
-                        "empty is normal — YOU create the initial files. Stop exploring and "
-                        "write your deliverable NOW with write_artifact(section=<path>, "
-                        "content=<full file contents>). Do not just describe it."})
-                    self._emit("say", "(nudged: no file produced yet — writing deliverable)")
-                    continue
-                break
+                return
             results = []
             for tc in resp.tool_calls:
                 results.append({
@@ -122,14 +129,10 @@ class ReasoningAgent:
                     "content": self._run_tool(tc, bb),
                 })
             messages.append({"role": "user", "content": results})
-        self._log_file_changes(bb, before)
-        return STATE_DONE
 
-    def _needs_nudge(self, before, already_nudged: bool) -> bool:
-        """A producing role that has written nothing this turn gets one push."""
-        if already_nudged or self.workspace is None:
-            return False
-        if self.role not in self._PRODUCER_ROLES:
+    def _needs_nudge(self, before) -> bool:
+        """True when a producing role has written nothing this turn."""
+        if self.workspace is None or self.role not in self._PRODUCER_ROLES:
             return False
         return not self.workspace.changed_since(before)
 
