@@ -10,14 +10,31 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 
 ## Status
 
-Early build — see the milestone table in `DESIGN.md` §16. Currently: blackboard.
+Milestones **M1–M10 complete**, 42 unit tests green — see `DESIGN.md` §16. The
+full pipeline runs offline against a mock model; the real-Claude path is wired
+but needs the SDK + an API key.
+
+Run the offline demo:
+
+```bash
+python3 -m pixibot.run        # prints an Observer report for a mock run
+```
 
 ## Layout
 
 - `pixibot/` — the harness package
   - `blackboard.py` — SQLite append-only event log (the shared substrate, §13)
+  - `context_manager.py` — message-driven activation scheduler (§9)
+  - `schema.py` — input/projection validation + bounded repair loop (§6/§7)
+  - `model.py` — `Model` abstraction: `MockModel` (offline) / `AnthropicModel`
+  - `agent.py`, `factory.py`, `tools.py` — the stateless reasoning agent (§9)
+  - `tpm.py`, `orchestrator.py`, `run.py` — plan → materialize → run pipeline
+  - `runtime.py` — Docker-per-run executor + local fallback (§11)
+  - `observer.py` — message DAG + run report (§11)
+  - `gates.py`, `standards.py` — mechanical checkpoint gate + standards (§10)
   - `config.py` — depth → model / effort mapping (§8)
 - `standards/` — versioned quality standards agents read on demand (§10)
+- `docker/` — per-run workspace image
 - `tests/` — unit tests (stdlib `unittest`)
 
 ## Development

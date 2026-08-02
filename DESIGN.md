@@ -467,26 +467,40 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 
 ---
 
-## 15. Open questions (genuinely open)
+## 15. Open questions
 
-1. **Invalid projection:** hard reject, or a repair loop, when the TPM emits an
-   invalid projection?
-2. **Revision cycle:** does failed-demo feedback re-run the whole TPM, or patch
-   the existing projection?
+**Resolved during the build:**
+- *Invalid projection* → **bounded repair loop** — implemented (`schema.obtain_valid`,
+  used by `tpm.plan`).
+- *Revision cycle* → decided: **re-invoke the TPM** with the prior projection +
+  demo feedback + current blackboard. Decision recorded; the interactive
+  demo/feedback loop is not yet wired into `run.run_pipeline` (see §16).
 
-### Information still needed from the user
-3. A **first concrete reference project** to design and validate the system against.
-4. **Existing coding standards/style guides** to ingest, or author `standards/` fresh?
+### Still needed from the user
+1. A **first concrete reference project** to validate against a real run.
+2. **Existing coding standards/style guides** to ingest, or keep authoring
+   `standards/` fresh.
 
 ---
 
-## 16. Next steps (not started)
+## 16. Status & next steps
 
-- Resolve §15 Q1–Q2.
-- Get the reference project (§15 Q3) and standards source (§15 Q4).
-- Freeze v0 of the input + projection grammars (formal JSON Schema).
-- Draft v0 of the `standards/` library.
-- Implement, in order: the **blackboard service + SQLite schema** → the
-  **context-manager loop** (message-driven activation) → **one agent end-to-end**
-  inside a Docker run.
+**Implemented (M1–M10), all unit-tested (42 tests green), on `main`:** blackboard
+(§13), context-manager (§9), input/projection schemas + repair loop (§6/§7),
+agent runtime with a `Model` abstraction (§9), agent factory, TPM (§7),
+orchestrator (§5), full offline pipeline (`pixibot/run.py`), Docker executor +
+local fallback (§11), Observer (§11), mechanical checkpoint gate (§10).
+
+**Coded but not yet exercised:** the real-Claude path (`AnthropicModel`,
+`anthropic_*` factories) — needs the `anthropic` SDK installed and
+`ANTHROPIC_API_KEY`. Everything else runs offline against `MockModel`.
+
+**Next wiring:**
+- Human **checkpoint → demo → feedback → revision** loop into `run_pipeline`
+  (the gate exists standalone; the pause/revise cycle isn't wired yet).
+- **Multi-agent projections** with dependencies/handshakes beyond the
+  single-agent demo (topology → LLD → programmer → tester).
+- Build & use the **Docker image** for real tool execution.
+- Deepen `standards/` and invoke the gate at each checkpoint.
+- A **first reference project** for a real end-to-end run (§15).
 ```
