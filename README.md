@@ -27,7 +27,10 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 | `@<agent>` | Switch the current agent |
 | `/at <agent>` | Switch the current agent |
 | `/build <objective>` | Plan + run a build |
+| `/revise <feedback>` | Re-plan from demo feedback (adds/changes agents) |
 | `/tell <agent> <text>` | Send a non-blocking steering directive |
+| `/hard [on\|off]` | Toggle hard-development routing (principal → Fable 5) |
+| `/form` | Show the build-request intake form |
 | `/agents` | List agents on the blackboard |
 | `/report` | Print the Observer run report |
 | `/help` | Show help |

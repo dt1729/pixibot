@@ -478,6 +478,7 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 33. **Standards injection = hybrid** progressive disclosure; **enforcement = mechanical gates** at checkpoints before the human demo.
 34. **Schema defaults:** one DB file per run; `payload` TEXT (v0); broadcast `to_agent='*'` supported.
 35. **Interaction layer (M11):** talking to an agent never pauses it — a Broker snapshots its blackboard context and spins a cheap read-only Haiku spokesbot for the chat; steering is a separate non-blocking `directive`. CLI is a chatbot (`python -m pixibot`): TPM default, `@<id>` addressing, `/tell`, `/build`.
+36. **Multi-agent wiring (M12):** dependency-driven activation (an artifact write wakes the agents that read that section) drives handshakes; the **Engine** persists a run for build/resume/tell/revise; **revision** re-invokes the TPM and splices in new agents; a **markdown intake form** captures the strict input, with a **hard-development** flag routing principal agents to Claude Fable 5 at xhigh effort.
 
 ---
 
