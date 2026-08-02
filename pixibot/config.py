@@ -23,6 +23,10 @@ DEPTH_EFFORT = {
 
 DEFAULT_MODEL = "claude-opus-4-8"
 
+# Cheapest per-token model — used for the read-only user<->agent spokesbots (§12).
+HAIKU_MODEL = "claude-haiku-4-5"
+SPOKESBOT_MODEL = HAIKU_MODEL
+
 
 def model_for(depth: str, *, hard: bool = False) -> str:
     """Resolve the model id for a depth tier."""

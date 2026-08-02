@@ -162,6 +162,12 @@ class Blackboard:
             agent["budget"] = json.loads(agent["budget"])
         return agent
 
+    def list_agents(self) -> list[dict]:
+        rows = self._db.execute(
+            "SELECT agent_id, role, depth, model, scope, state FROM agents ORDER BY agent_id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── writing (append-only) ───────────────────────────────────────────────
     def send(
         self,

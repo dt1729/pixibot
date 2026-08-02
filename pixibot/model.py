@@ -61,10 +61,12 @@ class MockModel(Model):
 class AnthropicModel(Model):
     """Calls real Claude. The SDK import is deferred to first use."""
 
-    def __init__(self, model_id: str, *, effort: str = "high", max_tokens: int = 16000):
+    def __init__(self, model_id: str, *, effort: "str | None" = "high",
+                 max_tokens: int = 16000, use_thinking: bool = True):
         self.model_id = model_id
         self.effort = effort
         self.max_tokens = max_tokens
+        self.use_thinking = use_thinking  # Haiku rejects effort/adaptive thinking
         self._client = None
 
     def _client_lazy(self):
@@ -76,15 +78,18 @@ class AnthropicModel(Model):
 
     def generate(self, *, system, messages, tools) -> ModelResponse:
         client = self._client_lazy()
-        resp = client.messages.create(
+        kwargs = dict(
             model=self.model_id,
             max_tokens=self.max_tokens,
             system=system,
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.effort},
             tools=tools or [],
             messages=messages,
         )
+        if self.use_thinking:
+            kwargs["thinking"] = {"type": "adaptive"}
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+        resp = client.messages.create(**kwargs)
         text = ""
         tool_calls: list[ToolCall] = []
         for block in resp.content:
