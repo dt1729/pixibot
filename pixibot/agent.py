@@ -1,0 +1,95 @@
+"""ReasoningAgent — a stateless agent that runs a tool loop per activation.
+
+Statelessness (DESIGN.md §9): each activation rebuilds context from the
+blackboard — the inbox events that woke it plus the sections it reads — runs the
+model→tool loop until the model stops calling tools, and writes results back to
+the blackboard. Nothing is held in memory between activations.
+
+Its ``runner`` method plugs directly into ``ContextManager``.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from .blackboard import Blackboard, Event
+from .context_manager import STATE_DONE
+from .model import Model, ModelResponse
+from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
+
+
+class ReasoningAgent:
+    def __init__(
+        self,
+        agent_id: str,
+        model: Model,
+        *,
+        system_prompt: str = "",
+        role: Optional[str] = None,
+        depth: Optional[str] = None,
+        scope: Optional[str] = None,
+        reads: tuple[str, ...] = (),
+        tool_defs: Optional[list[dict]] = None,
+        tool_impls: Optional[dict] = None,
+        max_iters: int = 8,
+    ):
+        self.agent_id = agent_id
+        self.model = model
+        self.system_prompt = system_prompt
+        self.role = role
+        self.depth = depth
+        self.scope = scope
+        self.reads = tuple(reads)
+        self.tool_defs = tool_defs if tool_defs is not None else DEFAULT_TOOL_DEFS
+        self.tool_impls = tool_impls if tool_impls is not None else default_tool_impls()
+        self.max_iters = max_iters
+
+    # -- context rebuild (stateless) -----------------------------------------
+    def _initial_messages(self, bb: Blackboard, events: list[Event]) -> list[dict]:
+        parts: list[str] = []
+        for e in events:
+            tag = e.kind if e.kind != "message" else f"from {e.from_agent}"
+            parts.append(f"[{tag}] {e.payload}")
+        for section in self.reads:
+            ev = bb.read_section(section)
+            if ev is not None:
+                parts.append(f"[blackboard:{section}]\n{ev.payload}")
+        return [{"role": "user", "content": "\n\n".join(parts) or "(no input)"}]
+
+    @staticmethod
+    def _assistant_content(resp: ModelResponse) -> list[dict]:
+        content: list[dict] = []
+        if resp.text:
+            content.append({"type": "text", "text": resp.text})
+        for tc in resp.tool_calls:
+            content.append({"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input})
+        return content or [{"type": "text", "text": ""}]
+
+    def _run_tool(self, tc, bb: Blackboard) -> str:
+        impl = self.tool_impls.get(tc.name)
+        if impl is None:
+            return f"error: unknown tool '{tc.name}'"
+        try:
+            return impl(self, bb, tc.input)
+        except Exception as exc:  # surface failures to the model, don't crash the loop
+            return f"error running {tc.name}: {exc}"
+
+    # -- the activation loop -------------------------------------------------
+    def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
+        messages = self._initial_messages(bb, events)
+        for _ in range(self.max_iters):
+            resp = self.model.generate(
+                system=self.system_prompt, messages=messages, tools=self.tool_defs
+            )
+            messages.append({"role": "assistant", "content": self._assistant_content(resp)})
+            if resp.stop_reason != "tool_use" or not resp.tool_calls:
+                break
+            results = []
+            for tc in resp.tool_calls:
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tc.id,
+                    "content": self._run_tool(tc, bb),
+                })
+            messages.append({"role": "user", "content": results})
+        return STATE_DONE
