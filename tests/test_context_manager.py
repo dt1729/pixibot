@@ -56,11 +56,16 @@ class ContextManagerTest(unittest.TestCase):
         self.assertEqual(len(self.bb.history()), 5)
 
     def test_infinite_interaction_hits_step_budget(self):
-        def runner(bb, me, events):
-            bb.send(me, "again", to="self_loop")  # never stops
+        # Two agents bat a message back and forth forever (an agent can no longer
+        # wake itself, so the runaway loop is modelled with a mutual ping-pong).
+        def make(peer):
+            def runner(bb, me, events):
+                bb.send(me, "again", to=peer)  # never stops
+            return runner
 
-        self.cm.register("self_loop", runner)
-        self.bb.send("user", "go", to="self_loop")
+        self.cm.register("ping", make("pong"))
+        self.cm.register("pong", make("ping"))
+        self.bb.send("user", "go", to="ping")
         steps = self.cm.run()
         self.assertEqual(steps, self.cm.max_steps)  # budget stopped the loop, no hang
 
