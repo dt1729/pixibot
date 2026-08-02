@@ -78,6 +78,14 @@ Model-per-depth mappings live in `pixibot/config.py` (edit the `*_DEPTH_MODELS`
 dicts to taste). Hard-development (`/hard on`) routes principal agents to the
 strongest model of the active provider.
 
+## Output: real files
+
+Agents write actual files to a per-run workspace at `~/pixibot-workspace/<run>/`
+(the CLI uses run `cli`). They read each other's files and run commands there —
+e.g. the tester runs `pytest`. Coordination is a deterministic dependency chain
+(architect → programmer → tester → …) so every agent participates.
+
+
 ## Layout
 
 - `pixibot/` — the harness package
