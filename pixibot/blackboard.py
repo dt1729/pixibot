@@ -5,12 +5,17 @@ writing *addressed* events (``from_agent`` -> ``to_agent``) and reading their
 inbox. The ``events`` table is immutable/append-only — the Observer's history is
 sacred — so mutable state (delivery cursors, the agent registry) lives in
 separate tables.
+
+Thread-safe: the connection is opened with ``check_same_thread=False`` and every
+method serializes on an ``RLock`` so a background build thread and the UI thread
+can share one Blackboard.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -83,16 +88,10 @@ class Event:
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> "Event":
         return cls(
-            id=row["id"],
-            run_id=row["run_id"],
-            ts=row["ts"],
-            kind=row["kind"],
-            from_agent=row["from_agent"],
-            to_agent=row["to_agent"],
-            section=row["section"],
-            payload=row["payload"],
-            in_reply_to=row["in_reply_to"],
-            urgent=bool(row["urgent"]),
+            id=row["id"], run_id=row["run_id"], ts=row["ts"], kind=row["kind"],
+            from_agent=row["from_agent"], to_agent=row["to_agent"],
+            section=row["section"], payload=row["payload"],
+            in_reply_to=row["in_reply_to"], urgent=bool(row["urgent"]),
             meta=json.loads(row["meta"]) if row["meta"] else None,
         )
 
@@ -102,15 +101,12 @@ def _now() -> str:
 
 
 class Blackboard:
-    """A run-scoped view over the SQLite event log.
-
-    One ``Blackboard`` instance is one connection scoped to a ``run_id``. The
-    on-disk file may hold several runs (or, per DESIGN.md, one file per run).
-    """
+    """A run-scoped, thread-safe view over the SQLite event log."""
 
     def __init__(self, db_path: str, run_id: str = "default"):
         self.run_id = run_id
-        self._db = sqlite3.connect(db_path)
+        self._lock = threading.RLock()
+        self._db = sqlite3.connect(db_path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL;")   # safe concurrent readers/writers
         self._db.execute("PRAGMA foreign_keys=ON;")
@@ -118,43 +114,38 @@ class Blackboard:
         self._db.commit()
 
     def close(self) -> None:
-        self._db.close()
+        with self._lock:
+            self._db.close()
 
     # ── agent registry (mutable) ────────────────────────────────────────────
-    def register_agent(
-        self,
-        agent_id: str,
-        *,
-        role: Optional[str] = None,
-        depth: Optional[str] = None,
-        model: Optional[str] = None,
-        scope: Optional[str] = None,
-        state: str = "SPAWNED",
-        budget: Optional[dict] = None,
-    ) -> None:
-        self._db.execute(
-            "INSERT INTO agents(agent_id, role, depth, model, scope, state, budget) "
-            "VALUES(?,?,?,?,?,?,?) "
-            "ON CONFLICT(agent_id) DO UPDATE SET "
-            "  role=excluded.role, depth=excluded.depth, model=excluded.model, "
-            "  scope=excluded.scope, state=excluded.state, budget=excluded.budget",
-            (agent_id, role, depth, model, scope, state,
-             json.dumps(budget) if budget is not None else None),
-        )
-        self._db.execute(
-            "INSERT OR IGNORE INTO cursors(agent_id, last_seen_event_id) VALUES(?, 0)",
-            (agent_id,),
-        )
-        self._db.commit()
+    def register_agent(self, agent_id: str, *, role: Optional[str] = None,
+                       depth: Optional[str] = None, model: Optional[str] = None,
+                       scope: Optional[str] = None, state: str = "SPAWNED",
+                       budget: Optional[dict] = None) -> None:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO agents(agent_id, role, depth, model, scope, state, budget) "
+                "VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(agent_id) DO UPDATE SET "
+                "  role=excluded.role, depth=excluded.depth, model=excluded.model, "
+                "  scope=excluded.scope, state=excluded.state, budget=excluded.budget",
+                (agent_id, role, depth, model, scope, state,
+                 json.dumps(budget) if budget is not None else None),
+            )
+            self._db.execute(
+                "INSERT OR IGNORE INTO cursors(agent_id, last_seen_event_id) VALUES(?, 0)",
+                (agent_id,),
+            )
+            self._db.commit()
 
     def set_state(self, agent_id: str, state: str) -> None:
-        self._db.execute("UPDATE agents SET state=? WHERE agent_id=?", (state, agent_id))
-        self._db.commit()
+        with self._lock:
+            self._db.execute("UPDATE agents SET state=? WHERE agent_id=?", (state, agent_id))
+            self._db.commit()
 
     def get_agent(self, agent_id: str) -> Optional[dict]:
-        row = self._db.execute(
-            "SELECT * FROM agents WHERE agent_id=?", (agent_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._db.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if not row:
             return None
         agent = dict(row)
@@ -163,37 +154,26 @@ class Blackboard:
         return agent
 
     def list_agents(self) -> list[dict]:
-        rows = self._db.execute(
-            "SELECT agent_id, role, depth, model, scope, state FROM agents ORDER BY agent_id"
-        ).fetchall()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT agent_id, role, depth, model, scope, state FROM agents ORDER BY agent_id"
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def latest_event_id(self) -> int:
-        row = self._db.execute(
-            "SELECT COALESCE(MAX(id), 0) AS m FROM events WHERE run_id=?", (self.run_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COALESCE(MAX(id), 0) AS m FROM events WHERE run_id=?", (self.run_id,)
+            ).fetchone()
         return int(row["m"])
 
     # ── writing (append-only) ───────────────────────────────────────────────
-    def send(
-        self,
-        from_agent: str,
-        payload: Any,
-        *,
-        to: Optional[str] = None,
-        kind: str = KIND_MESSAGE,
-        section: Optional[str] = None,
-        in_reply_to: Optional[int] = None,
-        urgent: bool = False,
-        meta: Optional[dict] = None,
-        enforce_scope: bool = True,
-    ) -> int:
-        """Append one event; return its id.
-
-        Artifact writes require a ``section`` and are checked against the
-        sender's declared ``scope`` (scope-as-write-lock, DESIGN.md §9). Non-str
-        payloads are JSON-encoded.
-        """
+    def send(self, from_agent: str, payload: Any, *, to: Optional[str] = None,
+             kind: str = KIND_MESSAGE, section: Optional[str] = None,
+             in_reply_to: Optional[int] = None, urgent: bool = False,
+             meta: Optional[dict] = None, enforce_scope: bool = True) -> int:
+        """Append one event; return its id. Artifact writes require a ``section``
+        and are checked against the sender's ``scope`` (scope-as-write-lock)."""
         if kind not in VALID_KINDS:
             raise ValueError(f"unknown kind: {kind!r}")
         if kind == KIND_ARTIFACT:
@@ -203,18 +183,16 @@ class Blackboard:
                 self._check_scope(from_agent, section)
         if not isinstance(payload, str):
             payload = json.dumps(payload)
-
-        cur = self._db.execute(
-            "INSERT INTO events("
-            "  run_id, ts, kind, from_agent, to_agent, section, payload, "
-            "  in_reply_to, urgent, meta) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (self.run_id, _now(), kind, from_agent, to, section, payload,
-             in_reply_to, 1 if urgent else 0,
-             json.dumps(meta) if meta is not None else None),
-        )
-        self._db.commit()
-        return int(cur.lastrowid)
+        with self._lock:
+            cur = self._db.execute(
+                "INSERT INTO events(run_id, ts, kind, from_agent, to_agent, section, "
+                "payload, in_reply_to, urgent, meta) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (self.run_id, _now(), kind, from_agent, to, section, payload,
+                 in_reply_to, 1 if urgent else 0,
+                 json.dumps(meta) if meta is not None else None),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
 
     def _check_scope(self, agent_id: str, section: str) -> None:
         agent = self.get_agent(agent_id)
@@ -222,72 +200,58 @@ class Blackboard:
             raise ScopeError(f"unknown agent {agent_id!r} cannot write {section!r}")
         scope = agent.get("scope")
         if not scope:
-            return  # no declared scope -> no restriction
+            return
         if section == scope or section.startswith(scope.rstrip("/") + "/"):
             return
-        raise ScopeError(
-            f"agent {agent_id!r} scope {scope!r} may not write section {section!r}"
-        )
+        raise ScopeError(f"agent {agent_id!r} scope {scope!r} may not write section {section!r}")
 
     # ── reading ─────────────────────────────────────────────────────────────
     def poll_inbox(self, agent_id: str, *, advance: bool = True) -> list[Event]:
-        """Return events addressed to ``agent_id`` (or broadcast) since its cursor.
-
-        With ``advance=True`` (default) the cursor moves past the returned
-        events, so the next poll only sees new arrivals. Pass ``advance=False``
-        to peek without consuming.
-        """
-        row = self._db.execute(
-            "SELECT last_seen_event_id FROM cursors WHERE agent_id=?", (agent_id,)
-        ).fetchone()
-        last = row["last_seen_event_id"] if row else 0
-        rows = self._db.execute(
-            "SELECT * FROM events "
-            "WHERE (to_agent=? OR to_agent=?) AND id>? AND run_id=? "
-            "ORDER BY id",
-            (agent_id, BROADCAST, last, self.run_id),
-        ).fetchall()
-        events = [Event._from_row(r) for r in rows]
-        if advance and events:
-            self._db.execute(
-                "INSERT INTO cursors(agent_id, last_seen_event_id) VALUES(?,?) "
-                "ON CONFLICT(agent_id) DO UPDATE SET "
-                "  last_seen_event_id=excluded.last_seen_event_id",
-                (agent_id, events[-1].id),
-            )
-            self._db.commit()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT last_seen_event_id FROM cursors WHERE agent_id=?", (agent_id,)
+            ).fetchone()
+            last = row["last_seen_event_id"] if row else 0
+            rows = self._db.execute(
+                "SELECT * FROM events WHERE (to_agent=? OR to_agent=?) AND id>? AND run_id=? "
+                "ORDER BY id",
+                (agent_id, BROADCAST, last, self.run_id),
+            ).fetchall()
+            events = [Event._from_row(r) for r in rows]
+            if advance and events:
+                self._db.execute(
+                    "INSERT INTO cursors(agent_id, last_seen_event_id) VALUES(?,?) "
+                    "ON CONFLICT(agent_id) DO UPDATE SET "
+                    "  last_seen_event_id=excluded.last_seen_event_id",
+                    (agent_id, events[-1].id),
+                )
+                self._db.commit()
         return events
 
     def read_section(self, section: str) -> Optional[Event]:
-        """Latest artifact written to ``section`` (the current value), or None."""
-        row = self._db.execute(
-            "SELECT * FROM events WHERE section=? AND kind=? AND run_id=? "
-            "ORDER BY id DESC LIMIT 1",
-            (section, KIND_ARTIFACT, self.run_id),
-        ).fetchone()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT * FROM events WHERE section=? AND kind=? AND run_id=? "
+                "ORDER BY id DESC LIMIT 1",
+                (section, KIND_ARTIFACT, self.run_id),
+            ).fetchone()
         return Event._from_row(row) if row else None
 
     def current_state(self) -> dict[str, Event]:
-        """Latest artifact per section — the working codebase/designs."""
-        rows = self._db.execute(
-            "SELECT * FROM events WHERE kind=? AND run_id=? ORDER BY id",
-            (KIND_ARTIFACT, self.run_id),
-        ).fetchall()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM events WHERE kind=? AND run_id=? ORDER BY id",
+                (KIND_ARTIFACT, self.run_id),
+            ).fetchall()
         state: dict[str, Event] = {}
         for r in rows:
             e = Event._from_row(r)
             if e.section is not None:
-                state[e.section] = e  # ascending id -> latest wins
+                state[e.section] = e
         return state
 
-    def history(
-        self,
-        *,
-        to_agent: Optional[str] = None,
-        from_agent: Optional[str] = None,
-        kind: Optional[str] = None,
-    ) -> list[Event]:
-        """Full ordered event history for the run (the Observer's raw material)."""
+    def history(self, *, to_agent: Optional[str] = None, from_agent: Optional[str] = None,
+                kind: Optional[str] = None) -> list[Event]:
         query = "SELECT * FROM events WHERE run_id=?"
         args: list[Any] = [self.run_id]
         if to_agent is not None:
@@ -300,4 +264,6 @@ class Blackboard:
             query += " AND kind=?"
             args.append(kind)
         query += " ORDER BY id"
-        return [Event._from_row(r) for r in self._db.execute(query, args).fetchall()]
+        with self._lock:
+            rows = self._db.execute(query, args).fetchall()
+        return [Event._from_row(r) for r in rows]

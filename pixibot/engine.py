@@ -42,6 +42,7 @@ class Engine:
         self.projection: Optional[dict] = None
         self.on_activation = None  # live-progress hook (agent finished)
         self.on_agent_start = None  # live-progress hook (agent started)
+        self.on_event = None       # per-agent activity feed on_event(agent_id, kind, detail)
         self.workspace = None      # real project dir; created on first build
 
     def _ensure_workspace(self):
@@ -60,7 +61,7 @@ class Engine:
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
         orchestrator.materialize(self.projection, self.bb, self.cm,
-                                 self.model_factory, self.workspace)
+                                 self.model_factory, self.workspace, self.on_event)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
         return {"projection": self.projection, "steps": steps, "workspace": self.workspace.root}
@@ -85,7 +86,7 @@ class Engine:
         new = [s for s in self.projection["agents"] if not self.cm.is_registered(s["id"])]
         for spec in new:
             orchestrator.register_one(spec, self.bb, self.cm, self.model_factory,
-                                      self._ensure_workspace())
+                                      self._ensure_workspace(), self.on_event)
             # only depend on agents that already completed, so new agents can start
             self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm._done)
         for spec in new:

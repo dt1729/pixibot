@@ -33,6 +33,7 @@ class ReasoningAgent:
         tool_impls: Optional[dict] = None,
         max_iters: int = 8,
         workspace=None,
+        on_event=None,
     ):
         self.agent_id = agent_id
         self.model = model
@@ -42,6 +43,7 @@ class ReasoningAgent:
         self.scope = scope
         self.reads = tuple(reads)
         self.workspace = workspace
+        self.on_event = on_event  # on_event(agent_id, kind, detail) — live activity feed
         self.tool_defs = tool_defs if tool_defs is not None else DEFAULT_TOOL_DEFS
         self.tool_impls = tool_impls if tool_impls is not None else default_tool_impls()
         self.max_iters = max_iters
@@ -91,6 +93,10 @@ class ReasoningAgent:
             resp = self.model.generate(
                 system=self.system_prompt, messages=messages, tools=self.tool_defs
             )
+            if resp.text.strip():
+                self._emit("say", resp.text.strip())
+            for tc in resp.tool_calls:
+                self._emit("tool", f"{tc.name}({self._tool_summary(tc.input)})")
             messages.append({"role": "assistant", "content": self._assistant_content(resp)})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
                 break
@@ -104,6 +110,20 @@ class ReasoningAgent:
             messages.append({"role": "user", "content": results})
         self._log_file_changes(bb, before)
         return STATE_DONE
+
+    def _emit(self, kind: str, detail: str) -> None:
+        if self.on_event:
+            try:
+                self.on_event(self.agent_id, kind, detail)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _tool_summary(inp: dict) -> str:
+        for key in ("section", "path", "command", "to"):
+            if key in inp:
+                return str(inp[key])[:80]
+        return ""
 
     def _log_file_changes(self, bb: Blackboard, before) -> None:
         """Record every file this agent created/changed as an artifact — however it

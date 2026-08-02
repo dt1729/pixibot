@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 from . import config, console, intake, mockrun, observer
 from .blackboard import Blackboard
@@ -362,6 +363,8 @@ def main(argv=None) -> None:
     ap.add_argument("--db", default="pixibot.db")
     ap.add_argument("--provider", choices=("auto",) + PROVIDERS, default="auto")
     ap.add_argument("--objective", help="one-shot: build this, then drop into the shell")
+    ap.add_argument("--tui", action="store_true", help="force the split-pane TUI")
+    ap.add_argument("--plain", action="store_true", help="force the plain shell (no TUI)")
     args = ap.parse_args(argv)
 
     # Arrow-key history + line editing (up/down recalls commands, left/right edits).
@@ -384,6 +387,19 @@ def main(argv=None) -> None:
     label, use_real, broker, engine_factory = _make_provider(bb, name)
     session = ChatSession(bb, broker, engine_factory, workspace=workspace,
                           provider_builder=lambda n: _make_provider(bb, n), provider_name=name)
+
+    # Default to the split-pane TUI when possible; fall back to the plain shell.
+    if args.tui or (not args.plain and sys.stdout.isatty()):
+        try:
+            from .tui import run_tui
+        except ImportError:
+            run_tui = None
+        if run_tui is not None:
+            run_tui(session, label)
+            bb.close()
+            return
+        print("(install `textual` for the split-pane view: pip install textual — using plain shell)")
+
     if use_real:
         session.progress = _progress
         session.progress_start = _progress_start
