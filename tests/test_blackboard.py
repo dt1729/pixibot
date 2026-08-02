@@ -46,6 +46,18 @@ class BlackboardTest(unittest.TestCase):
         # the sender is NOT woken by its own broadcast (no self-wake loop)
         self.assertEqual(self.bb.poll_inbox("tester"), [])
 
+    def test_reset_run_isolates_new_build(self):
+        self.bb.register_agent("old_agent")
+        self.bb.send("old_agent", "stale", to="tpm")
+        self.bb.reset_run("b2")
+        self.assertEqual(self.bb.run_id, "b2")
+        self.assertEqual(self.bb.list_agents(), [])       # stale agents gone
+        self.assertEqual(self.bb.history(), [])           # new run starts empty
+        # a fresh agent in the new run works normally
+        self.bb.register_agent("new_agent")
+        self.bb.send("tpm", "go", to="new_agent")
+        self.assertEqual(len(self.bb.poll_inbox("new_agent")), 1)
+
     def test_peek_does_not_advance(self):
         self.bb.register_agent("prog")
         self.bb.send("tpm", "hi", to="prog")

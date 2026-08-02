@@ -13,6 +13,15 @@ import subprocess
 
 _IGNORE = ("__pycache__", ".pytest_cache", ".git", ".venv", "venv", ".ffcheck",
            "site-packages", "node_modules", ".cache", ".mypy_cache", ".ruff_cache", ".tox")
+# path-segment prefixes to ignore too (pytest's tmp fixture dir is pytest-of-<user>)
+_IGNORE_PREFIXES = ("pytest-of-",)
+
+
+def _is_ignored(path: str) -> bool:
+    for seg in path.split(os.sep):
+        if seg in _IGNORE or seg.startswith(_IGNORE_PREFIXES):
+            return True
+    return False
 
 # Any env var whose name contains one of these is stripped from the child shell,
 # so a wandering agent can never read an API key/token out of the environment.
@@ -53,11 +62,10 @@ class Workspace:
         return {p: os.path.getmtime(self._safe(p)) for p in self.list_files()}
 
     def changed_since(self, before: dict) -> list[str]:
-        """Files created or modified since a snapshot (ignoring caches)."""
+        """Files created or modified since a snapshot (list_files already drops
+        caches/venvs/pytest tmp dirs)."""
         out = []
         for p in self.list_files():
-            if any(seg in p.split(os.sep) for seg in _IGNORE):
-                continue
             mt = os.path.getmtime(self._safe(p))
             if before is None or before.get(p) != mt:
                 out.append(p)
@@ -85,9 +93,14 @@ class Workspace:
 
     def list_files(self) -> list[str]:
         out = []
-        for dirpath, _, filenames in os.walk(self.root):
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            # prune ignored dirs so we don't descend into venvs/caches at all
+            dirnames[:] = [d for d in dirnames
+                           if d not in _IGNORE and not d.startswith(_IGNORE_PREFIXES)]
             for name in filenames:
-                out.append(os.path.relpath(os.path.join(dirpath, name), self.root))
+                rel = os.path.relpath(os.path.join(dirpath, name), self.root)
+                if not _is_ignored(rel):
+                    out.append(rel)
         return sorted(out)
 
     def isdir(self, path: str = "") -> bool:

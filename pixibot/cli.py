@@ -162,7 +162,9 @@ class ChatSession:
         if not objective.strip():
             return "usage: build <what to build>"
         self._start_engine(objective)
-        return self._built_msg(self.engine.build_objective(objective, hard=self.hard))
+        res = self.engine.build_objective(objective, hard=self.hard)
+        self.workspace = self.engine.workspace   # adopt this build's isolated workspace
+        return self._built_msg(res)
 
     def _build_from(self, path):
         if not path:
@@ -179,7 +181,9 @@ class ChatSession:
             return "the form is missing/invalid:\n- " + "\n- ".join(errs)
         self.hard = self.hard or bool(inp.get("hard"))
         self._start_engine(inp.get("objective", "build"))
-        return self._built_msg(self.engine.build(inp))
+        res = self.engine.build(inp)
+        self.workspace = self.engine.workspace   # adopt this build's isolated workspace
+        return self._built_msg(res)
 
     def _revise(self, feedback):
         if not self.engine:

@@ -39,6 +39,15 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("from workspace", out)
 
+    def test_pytest_tmp_and_venv_ignored(self):
+        self.ws.write_file("app.py", "x")
+        self.ws.write_file("pytest-of-dt/pytest-1/junk.txt", "tmp")
+        self.ws.write_file(".ffcheck/lib/pkg.py", "vendored")
+        files = self.ws.list_files()
+        self.assertIn("app.py", files)
+        self.assertNotIn("pytest-of-dt/pytest-1/junk.txt", files)
+        self.assertNotIn(".ffcheck/lib/pkg.py", files)
+
     def test_run_refuses_parent_traversal(self):
         rc, out = self.ws.run("cat ../../etc/hostname")
         self.assertEqual(rc, 126)

@@ -171,7 +171,6 @@ class PixibotApp(App):
             inp = default_input(objective, hard=s.hard)
 
         s.engine = s.engine_factory(s.hard, objective)
-        s.engine.workspace = s.workspace
         s.engine.on_agent_start = lambda a: self.call_from_thread(self._agent_start, a)
         s.engine.on_activation = lambda a, t, f: self.call_from_thread(self._agent_done, a, t, f)
         s.engine.on_event = lambda a, k, d: self.call_from_thread(self._agent_event, a, k, d)
@@ -180,8 +179,10 @@ class PixibotApp(App):
         self.call_from_thread(self._shell, f"[dim]building: {objective} …[/]")
         try:
             res = s.engine.build(inp)
+            s.workspace = s.engine.workspace   # adopt this build's isolated workspace
             self.call_from_thread(self._shell,
-                                  f"[green]✓[/] built in {res['steps']} step(s). try: ls · report")
+                                  f"[green]✓[/] built in {res['steps']} step(s) "
+                                  f"→ {res['run_id']}. try: ls · updates · report")
         except Exception as exc:  # noqa: BLE001
             self.call_from_thread(self._shell, f"[red]build failed:[/] {exc}")
 

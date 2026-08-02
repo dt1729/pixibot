@@ -117,6 +117,17 @@ class Blackboard:
         with self._lock:
             self._db.close()
 
+    def reset_run(self, run_id: str) -> None:
+        """Start a fresh, isolated run: switch to a new run_id and clear the
+        (global) agent registry + cursors so a new build never inherits stale
+        agents or read-positions from a previous one. Events are append-only and
+        namespaced by run_id, so prior runs stay on disk for audit/recovery."""
+        with self._lock:
+            self._db.execute("DELETE FROM agents")
+            self._db.execute("DELETE FROM cursors")
+            self._db.commit()
+        self.run_id = run_id
+
     # ── agent registry (mutable) ────────────────────────────────────────────
     def register_agent(self, agent_id: str, *, role: Optional[str] = None,
                        depth: Optional[str] = None, model: Optional[str] = None,

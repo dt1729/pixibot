@@ -8,7 +8,6 @@ import unittest
 from pixibot import mockrun
 from pixibot.blackboard import Blackboard
 from pixibot.engine import Engine
-from pixibot.workspace import Workspace
 
 
 class EngineTest(unittest.TestCase):
@@ -18,7 +17,7 @@ class EngineTest(unittest.TestCase):
         self.bb = Blackboard(self.path, run_id="eng")
         self.engine = Engine(self.bb, mockrun.mock_tpm_model("thing"), mockrun.mock_model_factory())
         self.wsdir = tempfile.mkdtemp()
-        self.engine.workspace = Workspace(self.wsdir)   # temp workspace (don't touch $HOME)
+        self.engine.workspace_base = self.wsdir   # per-run dirs land here (don't touch $HOME)
 
     def tearDown(self):
         self.bb.close()

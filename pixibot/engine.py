@@ -43,7 +43,8 @@ class Engine:
         self.on_activation = None  # live-progress hook (agent finished)
         self.on_agent_start = None  # live-progress hook (agent started)
         self.on_event = None       # per-agent activity feed on_event(agent_id, kind, detail)
-        self.workspace = None      # real project dir; created on first build
+        self.workspace = None      # real project dir; created per build
+        self.workspace_base = None # parent dir for per-run workspaces (defaults to ~/pixibot-workspace)
 
     def _ensure_workspace(self):
         if self.workspace is None:
@@ -55,7 +56,19 @@ class Engine:
         return self.workspace
 
     def build(self, inp: dict) -> dict:
-        self._ensure_workspace().clear()   # fresh workspace so old runs can't poison this one
+        import os
+        import time
+
+        from .workspace import Workspace
+
+        # Isolate this build: a fresh run_id (no stale agents/events from prior
+        # builds) and its own workspace dir, so an accidental rebuild can never
+        # wipe an earlier run's work. Old runs stay on disk for recovery.
+        run_id = f"b{time.strftime('%Y%m%d-%H%M%S')}"
+        self.bb.reset_run(run_id)
+        base = self.workspace_base or os.path.expanduser("~/pixibot-workspace")
+        self.workspace = Workspace(os.path.join(base, run_id))
+
         self.projection = tpm.plan(inp, self.tpm_model)
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
         self.cm.on_activation = self.on_activation
@@ -64,7 +77,8 @@ class Engine:
                                  self.model_factory, self.workspace, self.on_event)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
-        return {"projection": self.projection, "steps": steps, "workspace": self.workspace.root}
+        return {"projection": self.projection, "steps": steps,
+                "workspace": self.workspace.root, "run_id": run_id}
 
     def build_objective(self, objective: str, *, hard: bool = False) -> dict:
         return self.build(default_input(objective, hard=hard))
