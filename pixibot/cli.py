@@ -1,12 +1,10 @@
-"""Pixibot CLI — a chatbot over a persistent run (DESIGN.md §12).
+"""Pixibot CLI — a Claude-Code-like chatbot over a persistent run (DESIGN.md §12).
 
 Chat with the TPM by default; ``@<id>`` talks to any agent via a cheap read-only
 spokesbot that never pauses it; ``/tell`` steers (non-blocking); ``/build`` plans
-and runs; ``/revise`` re-plans from feedback; ``/form`` shows the intake form;
-``/hard`` toggles hard-development routing (principal -> Fable 5 at xhigh).
-
-Runs live against Claude when ``ANTHROPIC_API_KEY`` is set, otherwise offline
-against a canned multi-agent mock (so all the wiring is demonstrable with no key).
+and runs; ``/revise`` re-plans; ``/form`` shows the intake form; ``/hard`` toggles
+hard-development routing. Live (with ``ANTHROPIC_API_KEY``) it streams replies and
+shows per-agent progress; offline it runs a canned multi-agent mock.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from . import config, intake, mockrun, observer
+from . import config, console, intake, mockrun, observer
 from .blackboard import Blackboard
 from .engine import Engine
 from .interaction import Broker
@@ -44,9 +42,22 @@ class ChatSession:
         self.target = target
         self.hard = False
         self.engine = None
+        self.progress = None  # live-progress hook forwarded to the engine on /build
 
     def _agents_line(self) -> str:
         return ", ".join(a["agent_id"] for a in self.bb.list_agents()) or "(none)"
+
+    def parse_talk(self, line: str):
+        """Return (agent, message) if the line is a talk, else None (a command/switch)."""
+        line = line.strip()
+        if not line:
+            return None
+        if line.startswith("@"):
+            agent, _, text = line[1:].partition(" ")
+            return (agent, text) if text else None
+        if line.startswith("/"):
+            return None
+        return (self.target, line)
 
     def handle(self, line: str) -> str:
         line = line.strip()
@@ -78,6 +89,7 @@ class ChatSession:
         if line.startswith("/build "):
             objective = line[7:].strip()
             self.engine = self.engine_factory(self.hard, objective)
+            self.engine.on_activation = self.progress
             res = self.engine.build_objective(objective, hard=self.hard)
             return (f"Built in {res['steps']} step(s). Agents: {self._agents_line()}. "
                     f"Try '/report' or '@<agent> <question>'.")
@@ -104,6 +116,7 @@ class ChatSession:
         return self.broker.talk(self.target, line)
 
 
+# ── live wiring ──────────────────────────────────────────────────────────────
 def _anthropic_spokesbot():
     from .model import AnthropicModel
     return AnthropicModel(config.SPOKESBOT_MODEL, effort=None, use_thinking=False, max_tokens=1024)
@@ -123,6 +136,40 @@ def _offline_engine_factory(bb: Blackboard):
     return make
 
 
+def _progress(agent_id: str, terminal: str, wrote: list) -> None:
+    tag = console.label(agent_id)
+    if wrote:
+        console.write(f"  {console.c('◉', 'green')} {tag} → "
+                      f"{console.c(', '.join(wrote), 'cyan')}\n")
+    else:
+        console.write(f"  {console.c('•', 'gray')} {tag} "
+                      f"{console.c(terminal.lower(), 'dim')}\n")
+
+
+def _run_line(session: ChatSession, broker: Broker, line: str, use_real: bool) -> bool:
+    """Execute one input line with live styling. Returns False to quit."""
+    talk = session.parse_talk(line)
+    if use_real and talk:                       # stream a spokesbot reply live
+        agent, msg = talk
+        console.write(console.label(agent) + console.c(" ▸ ", "dim"))
+        broker.talk(agent, msg, on_delta=console.write)
+        console.write("\n")
+        return True
+
+    heavy = line.strip().startswith(("/build", "/revise", "/tell")) and use_real
+    if heavy:
+        with console.Spinner("agents working"):
+            out = session.handle(line)
+    else:
+        out = session.handle(line)
+
+    if out == "__quit__":
+        return False
+    if out:
+        print(out)
+    return True
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="pixibot", description="Pixibot chatbot CLI")
     ap.add_argument("--db", default="pixibot.db", help="blackboard db file")
@@ -134,22 +181,26 @@ def main(argv=None) -> None:
     broker = Broker(bb, (lambda: _anthropic_spokesbot()) if use_real else (lambda: None))
     engine_factory = _live_engine_factory(bb) if use_real else _offline_engine_factory(bb)
     session = ChatSession(bb, broker, engine_factory)
+    if use_real:
+        session.progress = _progress
 
-    print("Pixibot \U0001f916  (/help for commands, /quit to exit)")
-    print(f"mode: {'live (Claude)' if use_real else 'offline (no API key — canned multi-agent mock)'}")
+    print(console.banner())
+    mode = "live (Claude)" if use_real else "offline (mock — set ANTHROPIC_API_KEY to go live)"
+    print(console.c(f"mode: {mode}   ·   /help for commands, /quit to exit", "dim"))
+
     if args.objective:
-        print(session.handle(f"/build {args.objective}"))
+        _run_line(session, broker, f"/build {args.objective}", use_real)
 
     while True:
         try:
-            line = input(f"[{session.target}] > ")
+            prompt = console.c(f"\n[{session.target}]", "bold", console.agent_color(session.target))
+            line = input(prompt + console.c(" › ", "dim"))
         except (EOFError, KeyboardInterrupt):
             break
-        out = session.handle(line)
-        if out == "__quit__":
+        if not line.strip():
+            continue
+        if not _run_line(session, broker, line, use_real):
             break
-        if out:
-            print(out)
     bb.close()
 
 

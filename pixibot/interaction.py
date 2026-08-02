@@ -71,15 +71,20 @@ class Broker:
         self._factory = spokesbot_factory or (lambda: None)
         self._history: dict[str, list[dict]] = {}  # per-agent chat history
 
-    def talk(self, agent_id: str, message: str) -> str:
-        """Ask the agent's spokesbot a question. Read-only; never pauses the agent."""
+    def talk(self, agent_id: str, message: str, on_delta=None) -> str:
+        """Ask the agent's spokesbot a question. Read-only; never pauses the agent.
+
+        Pass ``on_delta`` to stream the reply token-by-token (live mode).
+        """
         snap = snapshot(self.bb, agent_id)
         model = self._factory()
         if model is None:  # offline: present the context itself
             return f"(offline — set ANTHROPIC_API_KEY for live chat)\n\n{snap}"
         hist = self._history.setdefault(agent_id, [])
         hist.append({"role": "user", "content": message})
-        resp = model.generate(system=_spokesbot_system(agent_id, snap), messages=hist, tools=[])
+        resp = model.stream_generate(
+            system=_spokesbot_system(agent_id, snap), messages=hist, tools=[], on_delta=on_delta
+        )
         hist.append({"role": "assistant", "content": [{"type": "text", "text": resp.text}]})
         return resp.text
 

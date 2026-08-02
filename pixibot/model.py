@@ -38,6 +38,13 @@ class Model:
     def generate(self, *, system: str, messages: list[dict], tools: list[dict]) -> ModelResponse:
         raise NotImplementedError
 
+    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+        """Default: non-streaming, emit the whole text once. Overridden by AnthropicModel."""
+        resp = self.generate(system=system, messages=messages, tools=tools)
+        if on_delta and resp.text:
+            on_delta(resp.text)
+        return resp
+
 
 # A script item is either a fixed response or a function of the messages so far.
 ScriptItem = Union[ModelResponse, Callable[[list[dict]], ModelResponse]]
@@ -98,3 +105,27 @@ class AnthropicModel(Model):
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
         return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=resp.stop_reason)
+
+    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+        client = self._client_lazy()
+        kwargs = dict(model=self.model_id, max_tokens=self.max_tokens, system=system,
+                      tools=tools or [], messages=messages)
+        if self.use_thinking:
+            kwargs["thinking"] = {"type": "adaptive"}
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+        with client.messages.stream(**kwargs) as stream:
+            for event in stream:
+                if (event.type == "content_block_delta"
+                        and getattr(event.delta, "type", "") == "text_delta"):
+                    if on_delta:
+                        on_delta(event.delta.text)
+            msg = stream.get_final_message()
+        text = ""
+        tool_calls: list[ToolCall] = []
+        for block in msg.content:
+            if block.type == "text":
+                text += block.text
+            elif block.type == "tool_use":
+                tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
+        return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=msg.stop_reason)

@@ -38,6 +38,8 @@ class ContextManager:
         self._runners: dict[str, AgentRunner] = {}
         self._readers: list[tuple[str, str]] = []          # (section_pattern, reader_id)
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
+        # Optional live-progress hook: on_activation(agent_id, terminal_state, wrote_sections)
+        self.on_activation = None
 
     # -- registration --------------------------------------------------------
     def register(self, agent_id: str, runner: AgentRunner, **agent_kwargs) -> None:
@@ -83,6 +85,10 @@ class ContextManager:
             terminal = runner(self.bb, agent_id, events) or STATE_DONE
             self.bb.set_state(agent_id, terminal)
             self._route_new_artifacts(agent_id, since)
+            if self.on_activation:
+                wrote = [e.section for e in self.bb.history(from_agent=agent_id)
+                         if e.kind == KIND_ARTIFACT and e.id > since]
+                self.on_activation(agent_id, terminal, wrote)
         return activated
 
     def run(self) -> int:

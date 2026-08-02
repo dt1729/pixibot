@@ -12,8 +12,10 @@ class FakeBroker:
     def __init__(self):
         self.calls = []
 
-    def talk(self, agent, message):
+    def talk(self, agent, message, on_delta=None):
         self.calls.append(("talk", agent, message))
+        if on_delta:
+            on_delta(f"[{agent}] {message}")
         return f"[{agent}] {message}"
 
     def tell(self, agent, text):
@@ -107,6 +109,13 @@ class CliTest(unittest.TestCase):
 
     def test_quit(self):
         self.assertEqual(self.session.handle("/quit"), "__quit__")
+
+    def test_parse_talk(self):
+        self.assertEqual(self.session.parse_talk("hello"), ("tpm", "hello"))
+        self.assertEqual(self.session.parse_talk("@prog why"), ("prog", "why"))
+        self.assertIsNone(self.session.parse_talk("@prog"))        # a switch, not a talk
+        self.assertIsNone(self.session.parse_talk("/report"))      # a command
+        self.assertIsNone(self.session.parse_talk(""))
 
 
 if __name__ == "__main__":

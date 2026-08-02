@@ -40,10 +40,12 @@ class Engine:
         self.max_steps = max_steps
         self.cm: Optional[ContextManager] = None
         self.projection: Optional[dict] = None
+        self.on_activation = None  # live-progress hook, forwarded to the context-manager
 
     def build(self, inp: dict) -> dict:
         self.projection = tpm.plan(inp, self.tpm_model)
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
+        self.cm.on_activation = self.on_activation
         orchestrator.materialize(self.projection, self.bb, self.cm, self.model_factory)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
