@@ -58,6 +58,48 @@ def anthropic_model_factory(spec: dict) -> Model:
     return make_anthropic_model_factory(False)(spec)
 
 
+# ── Gemini (OpenAI-compatible) wiring ────────────────────────────────────────
+def make_gemini_model_factory(hard: bool = False):
+    from .model import OpenAICompatModel
+
+    def factory(spec: dict) -> Model:
+        depth = spec.get("budget", {}).get("depth", "senior")
+        return OpenAICompatModel(
+            config.gemini_model_for(depth, hard=hard),
+            base_url=config.GEMINI_BASE_URL, api_key_env="GEMINI_API_KEY",
+        )
+    return factory
+
+
+def gemini_tpm_model() -> Model:
+    from .model import OpenAICompatModel
+    return OpenAICompatModel(
+        config.GEMINI_DEPTH_MODELS["senior"],
+        base_url=config.GEMINI_BASE_URL, api_key_env="GEMINI_API_KEY", max_tokens=8192,
+    )
+
+
+# ── OpenRouter (OpenAI-compatible) wiring ────────────────────────────────────
+def make_openrouter_model_factory(hard: bool = False):
+    from .model import OpenAICompatModel
+
+    def factory(spec: dict) -> Model:
+        depth = spec.get("budget", {}).get("depth", "senior")
+        return OpenAICompatModel(
+            config.openrouter_model_for(depth, hard=hard),
+            base_url=config.OPENROUTER_BASE_URL, api_key_env="OPENROUTER_API_KEY",
+        )
+    return factory
+
+
+def openrouter_tpm_model() -> Model:
+    from .model import OpenAICompatModel
+    return OpenAICompatModel(
+        config.OPENROUTER_DEPTH_MODELS["senior"],
+        base_url=config.OPENROUTER_BASE_URL, api_key_env="OPENROUTER_API_KEY", max_tokens=8192,
+    )
+
+
 def _demo() -> None:  # pragma: no cover - manual smoke run
     import json
     import os

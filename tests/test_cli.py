@@ -117,6 +117,22 @@ class CliTest(unittest.TestCase):
         self.assertIsNone(self.session.parse_talk("/report"))      # a command
         self.assertIsNone(self.session.parse_talk(""))
 
+    def test_provider_switch(self):
+        seen = []
+
+        def builder(name):
+            seen.append(name)
+            return (f"{name} label", name != "offline", FakeBroker(), lambda h, o: FakeEngine())
+
+        s = ChatSession(self.bb, self.broker, lambda h, o: self.engine,
+                        provider_builder=builder, provider_name="offline")
+        self.assertIn("current provider", s.handle("/provider"))
+        out = s.handle("/provider gemini")
+        self.assertIn("gemini", out)
+        self.assertEqual(s.provider_name, "gemini")
+        self.assertEqual(seen, ["gemini"])
+        self.assertIn("unknown", s.handle("/provider bogus"))
+
 
 if __name__ == "__main__":
     unittest.main()

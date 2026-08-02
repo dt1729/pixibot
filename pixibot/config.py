@@ -44,3 +44,35 @@ def effort_for(depth: str, *, hard: bool = False) -> str:
     if hard:
         return "xhigh"
     return DEPTH_EFFORT.get(depth, "high")
+
+
+# ── OpenAI-compatible providers (Gemini / OpenRouter / Groq / Ollama) ─────────
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GEMINI_DEPTH_MODELS = {
+    "junior": "gemini-2.5-flash",
+    "senior": "gemini-2.5-flash",
+    "principal": "gemini-2.5-pro",
+}
+GEMINI_SPOKESBOT_MODEL = "gemini-2.5-flash"
+
+
+def gemini_model_for(depth: str, *, hard: bool = False) -> str:
+    if hard and depth == "principal":
+        return "gemini-2.5-pro"
+    return GEMINI_DEPTH_MODELS.get(depth, "gemini-2.5-flash")
+
+
+# OpenRouter (one key -> many providers). Edit these slugs to any OpenRouter model.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_DEPTH_MODELS = {
+    "junior": "google/gemini-2.5-flash",
+    "senior": "anthropic/claude-sonnet-4.5",
+    "principal": "anthropic/claude-opus-4.1",
+}
+OPENROUTER_SPOKESBOT_MODEL = "google/gemini-2.5-flash"
+
+
+def openrouter_model_for(depth: str, *, hard: bool = False) -> str:
+    if hard and depth == "principal":
+        return "anthropic/claude-opus-4.1"
+    return OPENROUTER_DEPTH_MODELS.get(depth, "google/gemini-2.5-flash")

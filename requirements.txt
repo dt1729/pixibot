@@ -1,1 +1,3 @@
 anthropic
+# For OpenAI-compatible providers (Gemini, OpenRouter, Groq, local Ollama):
+openai

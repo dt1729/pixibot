@@ -25,6 +25,7 @@ HELP = """Commands:
   /revise <feedback>     re-plan from demo feedback
   /tell <agent> <text>   non-blocking steering directive (agent resumes)
   /hard [on|off]         toggle hard-development routing (principal -> Fable 5)
+  /provider [name]       switch model provider (anthropic|gemini|openrouter|offline)
   /form                  show the build-request intake form
   /agents                list agents on the blackboard
   /report                print the Observer run report
@@ -35,7 +36,8 @@ HELP = """Commands:
 class ChatSession:
     """Command router (testable without the input loop)."""
 
-    def __init__(self, bb: Blackboard, broker: Broker, engine_factory, *, target: str = "tpm"):
+    def __init__(self, bb: Blackboard, broker: Broker, engine_factory, *, target: str = "tpm",
+                 provider_builder=None, provider_name: str = "custom"):
         self.bb = bb
         self.broker = broker
         self.engine_factory = engine_factory  # (hard: bool, objective: str) -> Engine
@@ -43,6 +45,8 @@ class ChatSession:
         self.hard = False
         self.engine = None
         self.progress = None  # live-progress hook forwarded to the engine on /build
+        self.provider_builder = provider_builder  # (name) -> (label, use_real, broker, factory)
+        self.provider_name = provider_name
 
     def _agents_line(self) -> str:
         return ", ".join(a["agent_id"] for a in self.bb.list_agents()) or "(none)"
@@ -69,6 +73,20 @@ class ChatSession:
             return HELP
         if line == "/form":
             return intake.render_form()
+        if line.startswith("/provider"):
+            arg = line[len("/provider"):].strip().lower()
+            if not arg:
+                return (f"current provider: {self.provider_name}. "
+                        f"switch with: /provider <{' | '.join(PROVIDERS)}>")
+            if arg not in PROVIDERS:
+                return f"unknown provider '{arg}'. options: {', '.join(PROVIDERS)}"
+            if self.provider_builder is None:
+                return "(provider switching not available here)"
+            label, use_real, broker, factory = self.provider_builder(arg)
+            self.broker, self.engine_factory = broker, factory
+            self.provider_name, self.engine = arg, None
+            self.progress = _progress if use_real else None
+            return f"(switched to {label} — run /build to start a fresh run)"
         if line.startswith("/hard"):
             arg = line[5:].strip().lower()
             self.hard = (arg in ("on", "true", "yes")) if arg else (not self.hard)
@@ -136,6 +154,61 @@ def _offline_engine_factory(bb: Blackboard):
     return make
 
 
+def _gemini_spokesbot():
+    from .model import OpenAICompatModel
+    return OpenAICompatModel(config.GEMINI_SPOKESBOT_MODEL, base_url=config.GEMINI_BASE_URL,
+                             api_key_env="GEMINI_API_KEY", max_tokens=1024)
+
+
+def _gemini_engine_factory(bb: Blackboard):
+    from .run import gemini_tpm_model, make_gemini_model_factory
+
+    def make(hard: bool, objective: str) -> Engine:
+        return Engine(bb, gemini_tpm_model(), make_gemini_model_factory(hard))
+    return make
+
+
+def _openrouter_spokesbot():
+    from .model import OpenAICompatModel
+    return OpenAICompatModel(config.OPENROUTER_SPOKESBOT_MODEL, base_url=config.OPENROUTER_BASE_URL,
+                             api_key_env="OPENROUTER_API_KEY", max_tokens=1024)
+
+
+def _openrouter_engine_factory(bb: Blackboard):
+    from .run import make_openrouter_model_factory, openrouter_tpm_model
+
+    def make(hard: bool, objective: str) -> Engine:
+        return Engine(bb, openrouter_tpm_model(), make_openrouter_model_factory(hard))
+    return make
+
+
+PROVIDERS = ("anthropic", "gemini", "openrouter", "offline")
+
+
+def _make_provider(bb: Blackboard, name: str):
+    """Return (label, use_real, broker, engine_factory) for a provider name."""
+    if name == "gemini":
+        return ("gemini (Google AI Studio, free tier)", True,
+                Broker(bb, lambda: _gemini_spokesbot()), _gemini_engine_factory(bb))
+    if name == "openrouter":
+        return ("openrouter", True,
+                Broker(bb, lambda: _openrouter_spokesbot()), _openrouter_engine_factory(bb))
+    if name == "anthropic":
+        return ("anthropic (Claude)", True,
+                Broker(bb, lambda: _anthropic_spokesbot()), _live_engine_factory(bb))
+    return ("offline (mock)", False, Broker(bb, lambda: None), _offline_engine_factory(bb))
+
+
+def _auto_provider_name() -> str:
+    if os.environ.get("GEMINI_API_KEY"):
+        return "gemini"
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "openrouter"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    return "offline"
+
+
 def _progress(agent_id: str, terminal: str, wrote: list) -> None:
     tag = console.label(agent_id)
     if wrote:
@@ -173,20 +246,22 @@ def _run_line(session: ChatSession, broker: Broker, line: str, use_real: bool) -
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="pixibot", description="Pixibot chatbot CLI")
     ap.add_argument("--db", default="pixibot.db", help="blackboard db file")
+    ap.add_argument("--provider", choices=("auto",) + PROVIDERS, default="auto",
+                    help="model provider (default: auto-detect from env keys)")
     ap.add_argument("--objective", help="one-shot: build this, then drop into chat")
     args = ap.parse_args(argv)
 
     bb = Blackboard(args.db, run_id="cli")
-    use_real = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    broker = Broker(bb, (lambda: _anthropic_spokesbot()) if use_real else (lambda: None))
-    engine_factory = _live_engine_factory(bb) if use_real else _offline_engine_factory(bb)
-    session = ChatSession(bb, broker, engine_factory)
+    name = args.provider if args.provider != "auto" else _auto_provider_name()
+    label, use_real, broker, engine_factory = _make_provider(bb, name)
+
+    session = ChatSession(bb, broker, engine_factory,
+                          provider_builder=lambda n: _make_provider(bb, n), provider_name=name)
     if use_real:
         session.progress = _progress
 
     print(console.banner())
-    mode = "live (Claude)" if use_real else "offline (mock — set ANTHROPIC_API_KEY to go live)"
-    print(console.c(f"mode: {mode}   ·   /help for commands, /quit to exit", "dim"))
+    print(console.c(f"mode: {label}   ·   /provider to switch  ·  /help  ·  /quit", "dim"))
 
     if args.objective:
         _run_line(session, broker, f"/build {args.objective}", use_real)

@@ -14,6 +14,7 @@ details it doesn't need.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
@@ -129,3 +130,126 @@ class AnthropicModel(Model):
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
         return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=msg.stop_reason)
+
+
+class OpenAICompatModel(Model):
+    """Any OpenAI-compatible endpoint: Gemini, OpenRouter, Groq, OpenAI, Ollama.
+
+    Pixibot builds messages/tools in Anthropic shape; this class translates them
+    to/from the OpenAI chat-completions shape. The ``openai`` SDK is imported
+    lazily (only real calls need it, and only then must it be installed).
+    """
+
+    def __init__(self, model_id: str, *, base_url: str,
+                 api_key_env: str = "OPENAI_API_KEY", max_tokens: int = 4096):
+        self.model_id = model_id
+        self.base_url = base_url
+        self.api_key_env = api_key_env
+        self.max_tokens = max_tokens
+        self._client = None
+
+    def _client_lazy(self):
+        if self._client is None:
+            import os
+
+            from openai import OpenAI  # deferred
+            self._client = OpenAI(base_url=self.base_url, api_key=os.environ.get(self.api_key_env))
+        return self._client
+
+    # -- Anthropic-shape -> OpenAI-shape ------------------------------------
+    @staticmethod
+    def _to_messages(system, messages) -> list[dict]:
+        out: list[dict] = [{"role": "system", "content": system}] if system else []
+        for m in messages:
+            role, content = m["role"], m["content"]
+            if isinstance(content, str):
+                out.append({"role": role, "content": content})
+                continue
+            if role == "assistant":
+                text, calls = "", []
+                for b in content:
+                    if b.get("type") == "text":
+                        text += b["text"]
+                    elif b.get("type") == "tool_use":
+                        calls.append({"id": b["id"], "type": "function",
+                                      "function": {"name": b["name"],
+                                                   "arguments": json.dumps(b["input"])}})
+                msg = {"role": "assistant", "content": text or None}
+                if calls:
+                    msg["tool_calls"] = calls
+                out.append(msg)
+            else:  # user turn: tool_result blocks -> role:tool; text -> user text
+                texts = []
+                for b in content:
+                    if b.get("type") == "tool_result":
+                        c = b["content"]
+                        out.append({"role": "tool", "tool_call_id": b["tool_use_id"],
+                                    "content": c if isinstance(c, str) else json.dumps(c)})
+                    elif b.get("type") == "text":
+                        texts.append(b["text"])
+                if texts:
+                    out.append({"role": "user", "content": "\n".join(texts)})
+        return out
+
+    @staticmethod
+    def _to_tools(tools):
+        if not tools:
+            return None
+        return [{"type": "function",
+                 "function": {"name": t["name"], "description": t.get("description", ""),
+                              "parameters": t["input_schema"]}} for t in tools]
+
+    @staticmethod
+    def _parse_message(msg) -> ModelResponse:
+        text = msg.content or ""
+        calls = []
+        for tc in (getattr(msg, "tool_calls", None) or []):
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except (ValueError, TypeError):
+                args = {}
+            calls.append(ToolCall(tc.id, tc.function.name, args))
+        return ModelResponse(text=text, tool_calls=calls,
+                             stop_reason="tool_use" if calls else "end_turn")
+
+    def generate(self, *, system, messages, tools) -> ModelResponse:
+        client = self._client_lazy()
+        resp = client.chat.completions.create(
+            model=self.model_id, max_tokens=self.max_tokens,
+            messages=self._to_messages(system, messages), tools=self._to_tools(tools),
+        )
+        return self._parse_message(resp.choices[0].message)
+
+    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+        client = self._client_lazy()
+        stream = client.chat.completions.create(
+            model=self.model_id, max_tokens=self.max_tokens,
+            messages=self._to_messages(system, messages), tools=self._to_tools(tools),
+            stream=True,
+        )
+        text = ""
+        frags: dict[int, dict] = {}
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if getattr(delta, "content", None):
+                text += delta.content
+                if on_delta:
+                    on_delta(delta.content)
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                f = frags.setdefault(tc.index, {"id": None, "name": None, "args": ""})
+                if tc.id:
+                    f["id"] = tc.id
+                if tc.function and tc.function.name:
+                    f["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    f["args"] += tc.function.arguments
+        calls = []
+        for i in sorted(frags):
+            f = frags[i]
+            try:
+                args = json.loads(f["args"] or "{}")
+            except (ValueError, TypeError):
+                args = {}
+            calls.append(ToolCall(f["id"] or f"call_{i}", f["name"], args))
+        return ModelResponse(text=text, tool_calls=calls,
+                             stop_reason="tool_use" if calls else "end_turn")
