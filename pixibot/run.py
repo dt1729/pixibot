@@ -41,10 +41,21 @@ def anthropic_tpm_model() -> Model:
     return AnthropicModel(config.DEFAULT_MODEL)
 
 
-def anthropic_model_factory(spec: dict) -> Model:
+def make_anthropic_model_factory(hard: bool = False):
+    """Per-agent model factory. Hard development routes principal -> Fable 5 at xhigh."""
     from .model import AnthropicModel
-    depth = spec.get("budget", {}).get("depth", "senior")
-    return AnthropicModel(config.model_for(depth), effort=config.effort_for(depth))
+
+    def factory(spec: dict) -> Model:
+        depth = spec.get("budget", {}).get("depth", "senior")
+        return AnthropicModel(
+            config.model_for(depth, hard=hard),
+            effort=config.effort_for(depth, hard=hard),
+        )
+    return factory
+
+
+def anthropic_model_factory(spec: dict) -> Model:
+    return make_anthropic_model_factory(False)(spec)
 
 
 def _demo() -> None:  # pragma: no cover - manual smoke run

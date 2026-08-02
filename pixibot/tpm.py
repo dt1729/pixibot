@@ -47,3 +47,31 @@ def plan(inp: dict, model: Model, *, max_repairs: int = 3) -> dict:
         return _parse_json(resp.text)
 
     return obtain_valid(generate, validate_projection, max_attempts=max_repairs)
+
+
+REVISE_SYSTEM = TPM_SYSTEM + (
+    " You are revising an existing projection based on user feedback on a demo. "
+    "Keep what works, change what the feedback asks for, and return the full "
+    "updated projection JSON (all agents, including unchanged ones)."
+)
+
+
+def revise(prior: dict, feedback: str, model: Model, *, max_repairs: int = 3) -> dict:
+    """Re-plan from a prior projection + demo feedback (DESIGN.md §15 revision)."""
+    def _revise_prompt(errors: list[str]) -> str:
+        msg = ("Revise this projection based on the feedback. Return the full "
+               "updated JSON.\n\nPrior projection:\n" + json.dumps(prior, indent=2) +
+               "\n\nFeedback:\n" + feedback)
+        if errors:
+            msg += "\n\nFix these validation errors:\n- " + "\n- ".join(errors)
+        return msg
+
+    def generate(errors: list[str]) -> Any:
+        resp = model.generate(
+            system=REVISE_SYSTEM,
+            messages=[{"role": "user", "content": _revise_prompt(errors)}],
+            tools=[],
+        )
+        return _parse_json(resp.text)
+
+    return obtain_valid(generate, validate_projection, max_attempts=max_repairs)

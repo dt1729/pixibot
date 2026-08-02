@@ -168,6 +168,12 @@ class Blackboard:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def latest_event_id(self) -> int:
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(id), 0) AS m FROM events WHERE run_id=?", (self.run_id,)
+        ).fetchone()
+        return int(row["m"])
+
     # ── writing (append-only) ───────────────────────────────────────────────
     def send(
         self,

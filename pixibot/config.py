@@ -35,6 +35,12 @@ def model_for(depth: str, *, hard: bool = False) -> str:
     return DEPTH_MODELS.get(depth, DEFAULT_MODEL)
 
 
-def effort_for(depth: str) -> str:
-    """Resolve the reasoning effort for a depth tier."""
+def effort_for(depth: str, *, hard: bool = False) -> str:
+    """Resolve the reasoning effort for a depth tier.
+
+    Hard, long-horizon development runs at ``xhigh`` (the sweet spot for agentic
+    coding) regardless of tier.
+    """
+    if hard:
+        return "xhigh"
     return DEPTH_EFFORT.get(depth, "high")
