@@ -30,6 +30,7 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 | `/revise <feedback>` | Re-plan from demo feedback (adds/changes agents) |
 | `/tell <agent> <text>` | Send a non-blocking steering directive |
 | `/hard [on\|off]` | Toggle hard-development routing (principal → Fable 5) |
+| `/provider [name]` | Switch model provider (anthropic \| gemini \| openrouter \| offline) |
 | `/form` | Show the build-request intake form |
 | `/agents` | List agents on the blackboard |
 | `/report` | Print the Observer run report |
@@ -60,6 +61,22 @@ working agent), `/tell <agent> <directive>` to steer (non-blocking), `/agents`,
 `/report`, `/quit`. Offline it shows each agent's context snapshot; with
 `ANTHROPIC_API_KEY` set, spokesbots become live Haiku conversations and `/build`
 plans against real Claude.
+
+## Providers
+
+Pixibot runs against any of these — pick with `--provider <name>` at launch, or
+`/provider <name>` mid-session. With no flag it auto-detects from your env keys.
+
+| Provider | Set up | Cost |
+|---|---|---|
+| **Gemini** | Free key at aistudio.google.com → `export GEMINI_API_KEY=AIza...` | Free tier |
+| **OpenRouter** | Key at openrouter.ai → `export OPENROUTER_API_KEY=sk-or-...` | Pay-per-token (many models) |
+| **Anthropic** | `ANTHROPIC_API_KEY`, or `ant auth login` + API credits | Pay-per-token (Claude) |
+| **offline** | nothing — canned multi-agent mock | Free |
+
+Model-per-depth mappings live in `pixibot/config.py` (edit the `*_DEPTH_MODELS`
+dicts to taste). Hard-development (`/hard on`) routes principal agents to the
+strongest model of the active provider.
 
 ## Layout
 

@@ -480,6 +480,7 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 35. **Interaction layer (M11):** talking to an agent never pauses it — a Broker snapshots its blackboard context and spins a cheap read-only Haiku spokesbot for the chat; steering is a separate non-blocking `directive`. CLI is a chatbot (`python -m pixibot`): TPM default, `@<id>` addressing, `/tell`, `/build`.
 36. **Multi-agent wiring (M12):** dependency-driven activation (an artifact write wakes the agents that read that section) drives handshakes; the **Engine** persists a run for build/resume/tell/revise; **revision** re-invokes the TPM and splices in new agents; a **markdown intake form** captures the strict input, with a **hard-development** flag routing principal agents to Claude Fable 5 at xhigh effort.
 37. **Interface (M13):** Claude-Code-like REPL — ANSI console (banner, agent-colored labels, threaded spinner), **token streaming** for spokesbot chat in live mode, and **live per-agent build progress** via the context-manager `on_activation` hook. Colors/streaming activate on a TTY with a key set; degrades cleanly to plain text in pipes/tests.
+38. **Multi-provider (M14):** `OpenAICompatModel` translates Pixibot's Anthropic-shaped messages/tools to the OpenAI chat-completions shape (+ streaming), unlocking **Gemini** (free tier), **OpenRouter**, Groq, OpenAI, and local Ollama alongside native Anthropic. The provider is chosen via `--provider` (auto-detects from env keys) or the runtime `/provider` command (anthropic | gemini | openrouter | offline).
 
 ---
 
