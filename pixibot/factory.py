@@ -58,7 +58,11 @@ ROLE_BRIEFS = {
         "(e.g. section='tests/test_<feature>.py') covering the public interface, the integration "
         "points, and the error paths — not just the happy path. Then actually RUN them with "
         "run_bash (e.g. 'python -m pytest -q' or 'python test_file.py') and report the result. "
-        "If tests fail, say so with the output; if they pass, state it plainly with evidence."
+        "If tests fail, say so with the output; if they pass, state it plainly with evidence. "
+        "CRITICAL: a green run that SKIPPED tests is NOT a pass — report skipped/blocked tests "
+        "loudly (e.g. '12 passed, 2 SKIPPED because ffmpeg is missing → the core playback path "
+        "is UNVERIFIED'). Never let 'tests pass' hide that the feature's real behaviour was "
+        "never exercised. If a required system tool is missing, report it as BLOCKED, not done."
     ),
     "reviewer": (
         "ROLE: Reviewer.\n"

@@ -31,6 +31,7 @@ Build & steer:
   ask <agent> <question>     ask an agent's spokesperson (never pauses it)
 
 Inspect & configure:
+  updates               latest report from every agent
   think <agent>         show an agent's latest reasoning
   status                project status         agents         list the agents
   report                full run report        form           show the intake form
@@ -44,7 +45,7 @@ Anything else you type is a question to the project overseer.
 COMMANDS = {
     "ls", "cd", "pwd", "cat", "tree", "clear", "help", "?", "exit", "quit",
     "build", "build-from", "buildfrom", "revise", "tell", "ask",
-    "status", "agents", "report", "form", "provider", "hard", "think",
+    "status", "agents", "report", "form", "provider", "hard", "think", "updates",
 }
 HEAVY = {"build", "build-from", "buildfrom", "revise", "tell"}  # spin while these run
 
@@ -262,6 +263,8 @@ class ChatSession:
             return self._revise(rest)
         if cmd == "tell":
             return self._tell(rest)
+        if cmd == "updates":
+            return self._updates()
         if cmd == "think":
             return self._think(rest.strip())
         if cmd == "ask":
@@ -271,6 +274,21 @@ class ChatSession:
             return self.broker.talk(agent, q.strip())
         # anything else -> talk to the project overseer
         return self.broker.talk("tpm", line)
+
+    def _updates(self) -> str:
+        """Raw latest report from each agent + recent messages — no LLM in the loop."""
+        from .interaction import latest_reports
+        reports = latest_reports(self.bb)
+        agents = self.bb.list_agents()
+        if not agents:
+            return "no build has run yet — try: build <objective>"
+        out = ["=== agent updates ==="]
+        for a in agents:
+            aid, st = a["agent_id"], a.get("state")
+            rep = reports.get(aid)
+            out.append(f"\n[{aid}] ({st})")
+            out.append(f"  {rep.strip()}" if rep else "  (no report yet — still working or never ran)")
+        return "\n".join(out)
 
     def _think(self, agent: str) -> str:
         """Show an agent's most recent recorded reasoning (works cross-instance,

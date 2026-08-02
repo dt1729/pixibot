@@ -11,7 +11,8 @@ import re
 import shutil
 import subprocess
 
-_IGNORE = ("__pycache__", ".pytest_cache", ".git")
+_IGNORE = ("__pycache__", ".pytest_cache", ".git", ".venv", "venv", ".ffcheck",
+           "site-packages", "node_modules", ".cache", ".mypy_cache", ".ruff_cache", ".tox")
 
 # Any env var whose name contains one of these is stripped from the child shell,
 # so a wandering agent can never read an API key/token out of the environment.

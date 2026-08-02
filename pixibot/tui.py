@@ -26,7 +26,7 @@ from .cli import ChatSession
 from .engine import default_input
 
 _FAST = {"ls", "cd", "pwd", "cat", "tree", "status", "agents", "report",
-         "form", "hard", "provider", "help", "?", "think"}
+         "form", "hard", "provider", "help", "?", "think", "updates"}
 
 
 class PixibotApp(App):

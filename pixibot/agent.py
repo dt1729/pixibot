@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .blackboard import KIND_ARTIFACT, KIND_CONTROL, Blackboard, Event
+from .blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
 from .context_manager import STATE_DONE
 from .model import Model, ModelResponse
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
@@ -98,18 +98,21 @@ class ReasoningAgent:
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
         before = self.workspace.snapshot() if self.workspace is not None else None
         messages = self._initial_messages(bb, events)
-        self._tool_loop(bb, messages, self.max_iters)
+        last_text = self._tool_loop(bb, messages, self.max_iters)
         # Guarantee delivery: if a producing role wrote nothing — whether it stopped
         # early OR ran out of iterations exploring — force one dedicated delivery pass.
         if self._needs_nudge(before):
             messages.append({"role": "user", "content": self._NUDGE})
             self._emit("say", "(nudged: no file produced — forcing deliverable)")
-            self._tool_loop(bb, messages, max(4, self.max_iters // 2))
+            last_text = self._tool_loop(bb, messages, max(4, self.max_iters // 2)) or last_text
         self._log_file_changes(bb, before)
+        self._report_completion(bb, before, last_text)
         return STATE_DONE
 
-    def _tool_loop(self, bb: Blackboard, messages: list[dict], iters: int) -> None:
-        """Run model→tool turns until the model stops calling tools or `iters` runs out."""
+    def _tool_loop(self, bb: Blackboard, messages: list[dict], iters: int) -> str:
+        """Run model→tool turns until the model stops calling tools or `iters` runs out.
+        Returns the model's last non-empty text (the agent's own summary)."""
+        last_text = ""
         for _ in range(iters):
             resp = self.model.generate(
                 system=self.system_prompt, messages=messages, tools=self.tool_defs
@@ -118,12 +121,13 @@ class ReasoningAgent:
                 self._emit("think", resp.thinking.strip())
                 self._log_thinking(bb, resp.thinking.strip())
             if resp.text.strip():
-                self._emit("say", resp.text.strip())
+                last_text = resp.text.strip()
+                self._emit("say", last_text)
             for tc in resp.tool_calls:
                 self._emit("tool", f"{tc.name}({self._tool_summary(tc.input)})")
             messages.append({"role": "assistant", "content": self._assistant_content(resp)})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
-                return
+                return last_text
             results = []
             for tc in resp.tool_calls:
                 results.append({
@@ -132,6 +136,19 @@ class ReasoningAgent:
                     "content": self._run_tool(tc, bb),
                 })
             messages.append({"role": "user", "content": results})
+        return last_text
+
+    def _report_completion(self, bb: Blackboard, before, summary: str) -> None:
+        """Post a visible completion report to the overseer so the user (and the TPM
+        spokesbot) can see what each agent actually did — not just that it's DONE."""
+        files = self.workspace.changed_since(before) if self.workspace is not None else []
+        parts = [summary.strip() or "(finished; no summary given)"]
+        if files:
+            parts.append("Files: " + ", ".join(sorted(files)[:20]))
+        try:
+            bb.send(self.agent_id, "\n".join(parts), to="tpm", kind=KIND_MESSAGE)
+        except Exception:
+            pass
 
     def _needs_nudge(self, before) -> bool:
         """True when a producing role has written nothing this turn."""

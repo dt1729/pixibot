@@ -107,6 +107,18 @@ class AgentTest(unittest.TestCase):
         self.assertTrue(logged)  # persisted for cross-instance `think <agent>`
         self.assertIn("I will implement f first", logged[-1].payload)
 
+    def test_agent_posts_completion_report_to_tpm(self):
+        from pixibot.interaction import latest_reports
+        model = MockModel([
+            ModelResponse(text="12 passed, 2 SKIPPED (ffmpeg missing).", stop_reason="end_turn")])
+        agent = ReasoningAgent("tester", model, role="reviewer")  # non-producer: no nudge
+        self.bb.register_agent("tester")
+        self.bb.send("user", "validate", to="tester")
+        agent.runner(self.bb, "tester", self.bb.poll_inbox("tester"))
+        reps = latest_reports(self.bb)
+        self.assertIn("tester", reps)
+        self.assertIn("2 SKIPPED", reps["tester"])  # the caveat is now visible
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),

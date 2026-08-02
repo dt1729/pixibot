@@ -62,27 +62,46 @@ def _spokesbot_system(agent_id: str, snap: str) -> str:
 PROJECT_TARGETS = {"tpm", "project", "overseer", "orchestrator"}
 
 
+def latest_reports(bb: Blackboard) -> dict:
+    """agent_id -> its most recent completion report (the summary it posted to tpm)."""
+    reports: dict = {}
+    for e in bb.history(to_agent="tpm"):
+        if e.kind == "message" and e.from_agent not in ("context-manager", "user"):
+            reports[e.from_agent] = e.payload
+    return reports
+
+
 def project_snapshot(bb: Blackboard) -> str:
-    """A whole-project overview: agents, files/artifacts, and recent activity."""
+    """A whole-project overview with real content: agents + their completion
+    reports, files produced, and the latest substantive messages — enough for the
+    overseer to actually tell the user what happened, not just that it's DONE."""
     agents = bb.list_agents()
     state = bb.current_state()
     events = bb.history()
+    reports = latest_reports(bb)
     lines = ["PROJECT OVERVIEW",
              f"agents: {len(agents)}   files: {len(state)}   events: {len(events)}"]
     if agents:
-        lines.append("\nAgents:")
+        lines.append("\nAgents (with their latest report):")
         for a in agents:
-            lines.append(f"  {a['agent_id']}: role={a.get('role')} depth={a.get('depth')} "
+            aid = a["agent_id"]
+            lines.append(f"  {aid}: role={a.get('role')} depth={a.get('depth')} "
                          f"state={a.get('state')}")
+            rep = reports.get(aid)
+            if rep:
+                lines.append(f"      report: {rep[:400]}")
     if state:
-        lines.append("\nFiles / artifacts:")
+        lines.append("\nFiles produced:")
         for section in sorted(state):
             lines.append(f"  {section} (by {state[section].from_agent})")
-    if events:
-        lines.append("\nRecent activity:")
-        for e in events[-8:]:
-            dest = e.to_agent or e.section or ""
-            lines.append(f"  {e.from_agent} -> {dest} [{e.kind}]")
+    # the most recent substantive traffic (skip context-manager 'ready:' noise)
+    substantive = [e for e in events
+                   if e.kind in ("message", "directive") and e.from_agent != "context-manager"]
+    if substantive:
+        lines.append("\nLatest messages & directives:")
+        for e in substantive[-8:]:
+            dest = e.to_agent or "*"
+            lines.append(f"  {e.from_agent} -> {dest}: {e.payload[:300]}")
     if not agents and not state:
         lines.append("\n(no build has run yet — run: build <objective>  or  build-from <file.md>)")
     return "\n".join(lines)
