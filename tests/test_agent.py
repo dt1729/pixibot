@@ -90,6 +90,23 @@ class AgentTest(unittest.TestCase):
         agent.runner(self.bb, "rev", self.bb.poll_inbox("rev"))  # must not raise/hang
         self.assertEqual(agent.workspace.list_files(), [])
 
+    def test_thinking_is_emitted_and_logged(self):
+        from pixibot.blackboard import KIND_CONTROL
+        seen = []
+        model = MockModel([
+            ModelResponse(text="ok", thinking="I will implement f first", stop_reason="end_turn"),
+        ])
+        agent = ReasoningAgent("a", model,
+                               on_event=lambda aid, k, d: seen.append((k, d)))
+        self.bb.register_agent("a")
+        self.bb.send("user", "x", to="a")
+        agent.runner(self.bb, "a", self.bb.poll_inbox("a"))
+        self.assertTrue(any(k == "think" for k, _ in seen))  # streamed to the live pane
+        logged = [e for e in self.bb.history(from_agent="a", kind=KIND_CONTROL)
+                  if e.payload.startswith("[thinking]")]
+        self.assertTrue(logged)  # persisted for cross-instance `think <agent>`
+        self.assertIn("I will implement f first", logged[-1].payload)
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),

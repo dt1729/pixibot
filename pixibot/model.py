@@ -31,6 +31,7 @@ class ModelResponse:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     stop_reason: str = "end_turn"  # "end_turn" | "tool_use"
+    thinking: str = ""             # the model's reasoning for this turn (if exposed)
 
 
 class Model:
@@ -99,13 +100,19 @@ class AnthropicModel(Model):
             kwargs["output_config"] = {"effort": self.effort}
         resp = client.messages.create(**kwargs)
         text = ""
+        thinking = ""
         tool_calls: list[ToolCall] = []
         for block in resp.content:
             if block.type == "text":
                 text += block.text
+            elif block.type == "thinking":
+                thinking += getattr(block, "thinking", "")
+            elif block.type == "redacted_thinking":
+                thinking += "[redacted thinking]"
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
-        return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=resp.stop_reason)
+        return ModelResponse(text=text, tool_calls=tool_calls,
+                             stop_reason=resp.stop_reason, thinking=thinking)
 
     def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
         client = self._client_lazy()

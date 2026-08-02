@@ -26,7 +26,7 @@ from .cli import ChatSession
 from .engine import default_input
 
 _FAST = {"ls", "cd", "pwd", "cat", "tree", "status", "agents", "report",
-         "form", "hard", "provider", "help", "?"}
+         "form", "hard", "provider", "help", "?", "think"}
 
 
 class PixibotApp(App):
@@ -102,7 +102,12 @@ class PixibotApp(App):
             self._agent(f"◉ {aid} wrote: {', '.join(files)}")
 
     def _agent_event(self, aid: str, kind: str, detail: str) -> None:
-        self._agent(f"  {aid} → {detail}" if kind == "tool" else f"  {aid}: {detail[:200]}")
+        if kind == "tool":
+            self._agent(f"  {aid} → {detail}")
+        elif kind == "think":
+            self._agent(f"  🧠 {aid} thinking: {detail[:800]}")
+        else:
+            self._agent(f"  {aid}: {detail[:400]}")
 
     # ── input ───────────────────────────────────────────────────────────────
     def on_input_submitted(self, event: Input.Submitted) -> None:

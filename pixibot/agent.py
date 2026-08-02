@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .blackboard import KIND_ARTIFACT, Blackboard, Event
+from .blackboard import KIND_ARTIFACT, KIND_CONTROL, Blackboard, Event
 from .context_manager import STATE_DONE
 from .model import Model, ModelResponse
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
@@ -114,6 +114,9 @@ class ReasoningAgent:
             resp = self.model.generate(
                 system=self.system_prompt, messages=messages, tools=self.tool_defs
             )
+            if getattr(resp, "thinking", "").strip():
+                self._emit("think", resp.thinking.strip())
+                self._log_thinking(bb, resp.thinking.strip())
             if resp.text.strip():
                 self._emit("say", resp.text.strip())
             for tc in resp.tool_calls:
@@ -135,6 +138,14 @@ class ReasoningAgent:
         if self.workspace is None or self.role not in self._PRODUCER_ROLES:
             return False
         return not self.workspace.changed_since(before)
+
+    def _log_thinking(self, bb: Blackboard, thinking: str) -> None:
+        """Persist reasoning to the blackboard as a control event so a second
+        Pixibot instance (or `report`) can inspect what an agent was thinking."""
+        try:
+            bb.send(self.agent_id, f"[thinking]\n{thinking}", kind=KIND_CONTROL)
+        except Exception:
+            pass
 
     def _emit(self, kind: str, detail: str) -> None:
         if self.on_event:

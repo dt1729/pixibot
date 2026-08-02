@@ -31,6 +31,7 @@ Build & steer:
   ask <agent> <question>     ask an agent's spokesperson (never pauses it)
 
 Inspect & configure:
+  think <agent>         show an agent's latest reasoning
   status                project status         agents         list the agents
   report                full run report        form           show the intake form
   provider [name]       switch model           hard [on|off]  hard-dev routing
@@ -43,7 +44,7 @@ Anything else you type is a question to the project overseer.
 COMMANDS = {
     "ls", "cd", "pwd", "cat", "tree", "clear", "help", "?", "exit", "quit",
     "build", "build-from", "buildfrom", "revise", "tell", "ask",
-    "status", "agents", "report", "form", "provider", "hard",
+    "status", "agents", "report", "form", "provider", "hard", "think",
 }
 HEAVY = {"build", "build-from", "buildfrom", "revise", "tell"}  # spin while these run
 
@@ -261,6 +262,8 @@ class ChatSession:
             return self._revise(rest)
         if cmd == "tell":
             return self._tell(rest)
+        if cmd == "think":
+            return self._think(rest.strip())
         if cmd == "ask":
             agent, _, q = rest.partition(" ")
             if not agent or not q.strip():
@@ -268,6 +271,19 @@ class ChatSession:
             return self.broker.talk(agent, q.strip())
         # anything else -> talk to the project overseer
         return self.broker.talk("tpm", line)
+
+    def _think(self, agent: str) -> str:
+        """Show an agent's most recent recorded reasoning (works cross-instance,
+        reading straight from the shared blackboard)."""
+        if not agent:
+            return "usage: think <agent>   (e.g. think architect)"
+        from .blackboard import KIND_CONTROL
+        thoughts = [e for e in self.bb.history(from_agent=agent, kind=KIND_CONTROL)
+                    if e.payload.startswith("[thinking]")]
+        if not thoughts:
+            return (f"no recorded thinking for '{agent}' yet — it may not have run, or is "
+                    "running on a model without exposed thinking.")
+        return f"🧠 {agent} — latest reasoning:\n{thoughts[-1].payload[len('[thinking]'):].strip()}"
 
 
 # ── provider wiring ──────────────────────────────────────────────────────────
