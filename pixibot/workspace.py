@@ -42,6 +42,19 @@ class Workspace:
                 out.append(os.path.relpath(os.path.join(dirpath, name), self.root))
         return sorted(out)
 
+    def isdir(self, path: str = "") -> bool:
+        return os.path.isdir(self._safe(path))
+
+    def listdir(self, path: str = ""):
+        """Entries in a directory (dirs get a trailing '/'), or None if not a dir."""
+        full = self._safe(path)
+        if not os.path.isdir(full):
+            return None
+        entries = []
+        for name in sorted(os.listdir(full)):
+            entries.append(name + ("/" if os.path.isdir(os.path.join(full, name)) else ""))
+        return entries
+
     def run(self, command: str, timeout: int = 120):
         """Run a shell command in the workspace. Returns (returncode, output)."""
         p = subprocess.run(command, shell=True, cwd=self.root,

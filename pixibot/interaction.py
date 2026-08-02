@@ -59,6 +59,46 @@ def _spokesbot_system(agent_id: str, snap: str) -> str:
     )
 
 
+PROJECT_TARGETS = {"tpm", "project", "overseer", "orchestrator"}
+
+
+def project_snapshot(bb: Blackboard) -> str:
+    """A whole-project overview: agents, files/artifacts, and recent activity."""
+    agents = bb.list_agents()
+    state = bb.current_state()
+    events = bb.history()
+    lines = ["PROJECT OVERVIEW",
+             f"agents: {len(agents)}   files: {len(state)}   events: {len(events)}"]
+    if agents:
+        lines.append("\nAgents:")
+        for a in agents:
+            lines.append(f"  {a['agent_id']}: role={a.get('role')} depth={a.get('depth')} "
+                         f"state={a.get('state')}")
+    if state:
+        lines.append("\nFiles / artifacts:")
+        for section in sorted(state):
+            lines.append(f"  {section} (by {state[section].from_agent})")
+    if events:
+        lines.append("\nRecent activity:")
+        for e in events[-8:]:
+            dest = e.to_agent or e.section or ""
+            lines.append(f"  {e.from_agent} -> {dest} [{e.kind}]")
+    if not agents and not state:
+        lines.append("\n(no build has run yet — run: build <objective>  or  build-from <file.md>)")
+    return "\n".join(lines)
+
+
+def _project_system(snap: str) -> str:
+    return (
+        "You are the overseer for a Pixibot build — the friendly assistant the user talks to "
+        "by default. Using ONLY the project overview below, answer their questions about overall "
+        "status, what each agent did, and the files produced. You are read-only: to start a build "
+        "tell them to run 'build <objective>' or 'build-from <file.md>'; to steer an agent, "
+        "'tell <agent> <instruction>'; to inspect files, 'ls' / 'cat <file>'.\n\n"
+        f"--- project overview ---\n{snap}"
+    )
+
+
 # spokesbot_factory() -> Model | None  (None => offline mode: show context only)
 SpokesbotFactory = Callable[[], Optional[Model]]
 
@@ -76,15 +116,20 @@ class Broker:
 
         Pass ``on_delta`` to stream the reply token-by-token (live mode).
         """
-        snap = snapshot(self.bb, agent_id)
+        if agent_id in PROJECT_TARGETS:
+            snap = project_snapshot(self.bb)
+            system = _project_system(snap)
+            hist_key = "__project__"
+        else:
+            snap = snapshot(self.bb, agent_id)
+            system = _spokesbot_system(agent_id, snap)
+            hist_key = agent_id
         model = self._factory()
         if model is None:  # offline: present the context itself
-            return f"(offline — set ANTHROPIC_API_KEY for live chat)\n\n{snap}"
-        hist = self._history.setdefault(agent_id, [])
+            return f"(offline — set an API key for live chat)\n\n{snap}"
+        hist = self._history.setdefault(hist_key, [])
         hist.append({"role": "user", "content": message})
-        resp = model.stream_generate(
-            system=_spokesbot_system(agent_id, snap), messages=hist, tools=[], on_delta=on_delta
-        )
+        resp = model.stream_generate(system=system, messages=hist, tools=[], on_delta=on_delta)
         hist.append({"role": "assistant", "content": [{"type": "text", "text": resp.text}]})
         return resp.text
 
