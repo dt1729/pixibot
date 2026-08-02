@@ -37,6 +37,15 @@ class BlackboardTest(unittest.TestCase):
         # cursor advanced -> a second poll returns nothing new
         self.assertEqual(self.bb.poll_inbox("prog"), [])
 
+    def test_broadcast_delivered_to_others_but_not_self(self):
+        self.bb.register_agent("tester")
+        self.bb.register_agent("architect")
+        self.bb.send("tester", "everyone: build is broken", to=BROADCAST)
+        # a peer receives the broadcast
+        self.assertEqual(len(self.bb.poll_inbox("architect")), 1)
+        # the sender is NOT woken by its own broadcast (no self-wake loop)
+        self.assertEqual(self.bb.poll_inbox("tester"), [])
+
     def test_peek_does_not_advance(self):
         self.bb.register_agent("prog")
         self.bb.send("tpm", "hi", to="prog")

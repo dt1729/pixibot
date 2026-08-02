@@ -119,6 +119,26 @@ class AgentTest(unittest.TestCase):
         self.assertIn("tester", reps)
         self.assertIn("2 SKIPPED", reps["tester"])  # the caveat is now visible
 
+    def test_reactivation_reply_is_not_force_rewritten(self):
+        """An architect that already delivered, re-woken to answer an escalation,
+        may reply without being nudged into a pointless rewrite."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        self.bb.register_agent("architect")
+        # it already delivered ARCHITECTURE.md on a prior turn
+        self.bb.send("architect", "old design", kind="artifact", section="ARCHITECTURE.md")
+        calls = {"n": 0}
+
+        def gen(messages):
+            calls["n"] += 1
+            return ModelResponse(text="design still stands; here's why", stop_reason="end_turn")
+
+        agent = ReasoningAgent("architect", MockModel([gen, gen]),
+                               role="topology", workspace=Workspace(root))
+        self.bb.send("tester", "reconsider the decode path", to="architect")
+        agent.runner(self.bb, "architect", self.bb.poll_inbox("architect"))
+        self.assertEqual(calls["n"], 1)  # one turn only — no forced delivery loop
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),

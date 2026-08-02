@@ -27,7 +27,13 @@ ROLE_BRIEFS = {
         "Do NOT try to install system packages, apt/pip anything, or run long environment "
         "probes — assume a standard Python environment. If the project needs third-party "
         "libraries, just RECORD them (e.g. a requirements.txt via write_artifact). Your only "
-        "deliverable is the architecture file, and your turn is not done until you've written it."
+        "deliverable is the architecture file, and your turn is not done until you've written it.\n"
+        "YOU OWN THE DESIGN FOR THE WHOLE RUN. You may be re-activated when a downstream agent "
+        "(tester, reviewer, programmer) sends you a message challenging the design or reporting a "
+        "blocker. Take it seriously: if they are right, REVISE ARCHITECTURE.md (rewriting it "
+        "automatically re-triggers the downstream agents to conform); if the design still stands, "
+        "reply via send_message(to=<that agent>) explaining why. Your first turn is not final — a "
+        "good architect reconsiders when the evidence says the design is wrong."
     ),
     "lld": (
         "ROLE: Low-level design for a single feature.\n"
@@ -62,14 +68,22 @@ ROLE_BRIEFS = {
         "CRITICAL: a green run that SKIPPED tests is NOT a pass — report skipped/blocked tests "
         "loudly (e.g. '12 passed, 2 SKIPPED because ffmpeg is missing → the core playback path "
         "is UNVERIFIED'). Never let 'tests pass' hide that the feature's real behaviour was "
-        "never exercised. If a required system tool is missing, report it as BLOCKED, not done."
+        "never exercised. If a required system tool is missing, report it as BLOCKED, not done.\n"
+        "ESCALATE, don't paper over. When tests reveal a real problem, broadcast it loudly and "
+        "route it to whoever owns it: a bug in the code → send_message(to=<the programmer>); a "
+        "flaw in the DESIGN itself (wrong interfaces, an approach that can't work, a missing "
+        "component) → send_message(to='architect') stating the problem and what needs "
+        "reconsidering. That message re-activates them to fix it. A failing or blocked result is "
+        "not the end of your job — it's the start of the team's correction loop."
     ),
     "reviewer": (
         "ROLE: Reviewer.\n"
         "Read the full set of files (list_files, then read_file). Review for correctness bugs, "
         "missed edge cases, interface mismatches, and standards violations. Report concrete "
         "findings with file + line context. If you can fix a clear defect directly, do so with "
-        "write_artifact; otherwise write a REVIEW.md summarizing what must change and why."
+        "write_artifact; otherwise write a REVIEW.md summarizing what must change and why. "
+        "If a defect is architectural (not a local bug), escalate: send_message(to='architect') "
+        "with the concern so the design gets reconsidered rather than patched around."
     ),
 }
 
@@ -94,7 +108,12 @@ _WORKFLOW = (
     "  • list_files() to see the project; read_file(path) to read anything earlier agents wrote.\n"
     "  • write_artifact(section=<file path>, content=<full contents>) to create or replace a file.\n"
     "  • run_bash(command) to run code or tests inside the workspace.\n"
-    "  • send_message(to=<agent id>, content=...) only to ask a specific peer a question.\n"
+    "  • send_message(to=<agent id>, content=...) to ask or escalate to a specific peer.\n"
+    "SELF-CORRECTION: the team is not a one-way pipeline. Sending a message to an agent — even "
+    "one that already finished — RE-ACTIVATES it to respond. So if you find a problem that "
+    "belongs upstream (a design flaw → 'architect'; a bug → the programmer who wrote it), "
+    "send_message it there instead of working around it. That is how the team fixes its own "
+    "mistakes. Escalate real problems; don't silently absorb them.\n"
     "CONFINEMENT: You are locked to this one workspace directory. You cannot and must not read "
     "or touch anything outside it (no parent directories, no /home, no other projects, no system "
     "files) — such commands are refused. Everything you need is your input plus the files here; "

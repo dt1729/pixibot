@@ -101,7 +101,7 @@ class ReasoningAgent:
         last_text = self._tool_loop(bb, messages, self.max_iters)
         # Guarantee delivery: if a producing role wrote nothing — whether it stopped
         # early OR ran out of iterations exploring — force one dedicated delivery pass.
-        if self._needs_nudge(before):
+        if self._needs_nudge(bb, before):
             messages.append({"role": "user", "content": self._NUDGE})
             self._emit("say", "(nudged: no file produced — forcing deliverable)")
             last_text = self._tool_loop(bb, messages, max(4, self.max_iters // 2)) or last_text
@@ -150,11 +150,17 @@ class ReasoningAgent:
         except Exception:
             pass
 
-    def _needs_nudge(self, before) -> bool:
-        """True when a producing role has written nothing this turn."""
+    def _needs_nudge(self, bb: Blackboard, before) -> bool:
+        """True when a producing role has written nothing this turn AND has never
+        delivered before. On a re-activation (e.g. answering an escalation), the
+        agent already has a deliverable, so we don't force a pointless rewrite."""
         if self.workspace is None or self.role not in self._PRODUCER_ROLES:
             return False
-        return not self.workspace.changed_since(before)
+        if self.workspace.changed_since(before):
+            return False
+        delivered_before = any(e.kind == KIND_ARTIFACT
+                               for e in bb.history(from_agent=self.agent_id))
+        return not delivered_before
 
     def _log_thinking(self, bb: Blackboard, thinking: str) -> None:
         """Persist reasoning to the blackboard as a control event so a second

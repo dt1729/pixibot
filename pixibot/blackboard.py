@@ -213,9 +213,9 @@ class Blackboard:
             ).fetchone()
             last = row["last_seen_event_id"] if row else 0
             rows = self._db.execute(
-                "SELECT * FROM events WHERE (to_agent=? OR to_agent=?) AND id>? AND run_id=? "
-                "ORDER BY id",
-                (agent_id, BROADCAST, last, self.run_id),
+                "SELECT * FROM events WHERE (to_agent=? OR to_agent=?) AND from_agent<>? "
+                "AND id>? AND run_id=? ORDER BY id",
+                (agent_id, BROADCAST, agent_id, last, self.run_id),
             ).fetchall()
             events = [Event._from_row(r) for r in rows]
             if advance and events:
