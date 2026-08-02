@@ -38,6 +38,8 @@ class ContextManager:
         self._runners: dict[str, AgentRunner] = {}
         self._readers: list[tuple[str, str]] = []          # (section_pattern, reader_id)
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
+        self._deps: dict[str, set] = {}                    # agent_id -> set of agent_ids it needs
+        self._done: set[str] = set()                       # agents that have completed
         # Optional live-progress hook: on_activation(agent_id, terminal_state, wrote_sections)
         self.on_activation = None
 
@@ -52,6 +54,10 @@ class ContextManager:
     def add_dependency(self, section_pattern: str, reader_agent_id: str) -> None:
         """Reader activates when an artifact is written to a matching section."""
         self._readers.append((section_pattern, reader_agent_id))
+
+    def set_deps(self, agent_id: str, deps) -> None:
+        """Declare that `agent_id` runs only after all `deps` agents have completed."""
+        self._deps[agent_id] = set(deps)
 
     # -- dependency routing --------------------------------------------------
     @staticmethod
@@ -89,7 +95,18 @@ class ContextManager:
                 wrote = [e.section for e in self.bb.history(from_agent=agent_id)
                          if e.kind == KIND_ARTIFACT and e.id > since]
                 self.on_activation(agent_id, terminal, wrote)
+            if terminal == STATE_DONE:
+                self._done.add(agent_id)
+                self._wake_dependents(agent_id)
         return activated
+
+    def _wake_dependents(self, completed_id: str) -> None:
+        """Wake only agents that *directly depend on* the just-completed agent, and
+        only once all of their dependencies are satisfied. Limiting to direct
+        dependents avoids re-waking already-satisfied agents on every completion."""
+        for aid, deps in self._deps.items():
+            if completed_id in deps and deps <= self._done:
+                self.bb.send(ROUTER, "ready: dependencies complete", to=aid)
 
     def run(self) -> int:
         """Drive activation until quiescence or the step budget (resumable)."""

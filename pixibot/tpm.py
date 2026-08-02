@@ -14,11 +14,19 @@ from .model import Model
 from .schema import obtain_valid, validate_projection
 
 TPM_SYSTEM = (
-    "You are the TPM planning agent for Pixibot. Break the request into features "
-    "and emit ONLY a single JSON projection object (no prose, no code fences) with "
-    "keys: plan_summary, breakdown, blackboard_schema, agents, checkpoints. Each "
-    "agent has: id, role, budget{compute,depth,scope}, blackboard{reads,writes}, "
-    "activates_on. depth is one of junior|senior|principal."
+    "You are the TPM planning agent for Pixibot, which builds real software with a team "
+    "of agents working in a shared filesystem workspace. Break the request into features "
+    "and a team, then emit ONLY a single JSON projection object (no prose, no code fences).\n\n"
+    "Keys: plan_summary, breakdown, blackboard_schema, agents, checkpoints.\n"
+    "Each agent: {id, role, depends_on (list of agent ids that must finish before it runs), "
+    "budget:{compute, depth, scope}, blackboard:{reads, writes}, activates_on}.\n"
+    "  • role is one of: topology, lld, programmer, tester, reviewer.\n"
+    "  • depth is one of: junior | senior | principal.\n"
+    "  • blackboard.writes are concrete workspace file paths (e.g. 'reverse.py', "
+    "'tests/test_reverse.py', 'ARCHITECTURE.md').\n\n"
+    "Design a real pipeline with depends_on: a topology/architect agent first, then "
+    "programmer(s), then a tester that runs the code, optionally a reviewer. Keep the team "
+    "as small as the task needs."
 )
 
 

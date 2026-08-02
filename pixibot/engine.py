@@ -41,15 +41,26 @@ class Engine:
         self.cm: Optional[ContextManager] = None
         self.projection: Optional[dict] = None
         self.on_activation = None  # live-progress hook, forwarded to the context-manager
+        self.workspace = None      # real project dir; created on first build
+
+    def _ensure_workspace(self):
+        if self.workspace is None:
+            import os
+
+            from .workspace import Workspace
+            root = os.path.join(os.path.expanduser("~/pixibot-workspace"), self.bb.run_id)
+            self.workspace = Workspace(root)
+        return self.workspace
 
     def build(self, inp: dict) -> dict:
         self.projection = tpm.plan(inp, self.tpm_model)
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
         self.cm.on_activation = self.on_activation
-        orchestrator.materialize(self.projection, self.bb, self.cm, self.model_factory)
+        orchestrator.materialize(self.projection, self.bb, self.cm,
+                                 self.model_factory, self._ensure_workspace())
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
-        return {"projection": self.projection, "steps": steps}
+        return {"projection": self.projection, "steps": steps, "workspace": self.workspace.root}
 
     def build_objective(self, objective: str, *, hard: bool = False) -> dict:
         return self.build(default_input(objective, hard=hard))
@@ -67,9 +78,13 @@ class Engine:
         if not self.projection or not self.cm:
             raise RuntimeError("nothing to revise — build first")
         self.projection = tpm.revise(self.projection, feedback, self.tpm_model)
+        deps = orchestrator.infer_deps(self.projection)
         new = [s for s in self.projection["agents"] if not self.cm.is_registered(s["id"])]
         for spec in new:
-            orchestrator.register_one(spec, self.bb, self.cm, self.model_factory)
+            orchestrator.register_one(spec, self.bb, self.cm, self.model_factory,
+                                      self._ensure_workspace())
+            # only depend on agents that already completed, so new agents can start
+            self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm._done)
         for spec in new:
             self.bb.send("tpm", f"(revision) {feedback}", to=spec["id"])
         return self.resume()

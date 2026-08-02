@@ -1,12 +1,14 @@
 """Integration tests for the Engine: build cascade, directive-resume, revision."""
 
 import os
+import shutil
 import tempfile
 import unittest
 
 from pixibot import mockrun
 from pixibot.blackboard import Blackboard
 from pixibot.engine import Engine
+from pixibot.workspace import Workspace
 
 
 class EngineTest(unittest.TestCase):
@@ -15,9 +17,12 @@ class EngineTest(unittest.TestCase):
         os.close(fd)
         self.bb = Blackboard(self.path, run_id="eng")
         self.engine = Engine(self.bb, mockrun.mock_tpm_model("thing"), mockrun.mock_model_factory())
+        self.wsdir = tempfile.mkdtemp()
+        self.engine.workspace = Workspace(self.wsdir)   # temp workspace (don't touch $HOME)
 
     def tearDown(self):
         self.bb.close()
+        shutil.rmtree(self.wsdir, ignore_errors=True)
         for s in ("", "-wal", "-shm"):
             try:
                 os.unlink(self.path + s)

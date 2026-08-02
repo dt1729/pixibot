@@ -32,6 +32,7 @@ class ReasoningAgent:
         tool_defs: Optional[list[dict]] = None,
         tool_impls: Optional[dict] = None,
         max_iters: int = 8,
+        workspace=None,
     ):
         self.agent_id = agent_id
         self.model = model
@@ -40,6 +41,7 @@ class ReasoningAgent:
         self.depth = depth
         self.scope = scope
         self.reads = tuple(reads)
+        self.workspace = workspace
         self.tool_defs = tool_defs if tool_defs is not None else DEFAULT_TOOL_DEFS
         self.tool_impls = tool_impls if tool_impls is not None else default_tool_impls()
         self.max_iters = max_iters
@@ -50,6 +52,13 @@ class ReasoningAgent:
         for e in events:
             tag = e.kind if e.kind != "message" else f"from {e.from_agent}"
             parts.append(f"[{tag}] {e.payload}")
+        if self.workspace is not None:
+            files = self.workspace.list_files()
+            parts.append("[workspace files]\n" + ("\n".join(files) if files
+                                                   else "(empty — you may be the first agent)"))
+            parts.append("Use read_file(path) to read any of these, list_files() to refresh, "
+                         "write_artifact(section=<path>, content=...) to create/replace a file, "
+                         "and run_bash(command) to run it.")
         for section in self.reads:
             ev = bb.read_section(section)
             if ev is not None:

@@ -31,9 +31,11 @@ def main() -> None:
     objective = "a URL shortener service"
     engine = Engine(bb, mockrun.mock_tpm_model(objective), mockrun.mock_model_factory())
 
-    _hr(f"2) Build: {objective}  (multi-agent cascade via dependency handshakes)")
+    _hr(f"2) Build: {objective}  (dependency-chain cascade, real files on disk)")
     res = engine.build_objective(objective)
     print("agents:", [a["id"] for a in res["projection"]["agents"]], " steps:", res["steps"])
+    print("workspace:", res["workspace"])
+    print("files written to disk:", engine.workspace.list_files())
     for section in ("topology", "impl/f1", "tests/f1"):
         ev = bb.read_section(section)
         print(f"  {section}: {ev.payload if ev else '(none)'}")
