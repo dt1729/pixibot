@@ -35,10 +35,11 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 
 ## Status
 
-Milestones **M1–M16 complete**, 87 unit tests green — see `DESIGN.md` §16. It
+Milestones **M1–M17 complete**, 87 unit tests green — see `DESIGN.md` §16. It
 builds real, tested code on disk with a multi-agent team (verified live on
-Claude), driven from a friendly shell. Runs offline (mock) or live against
-Anthropic / Gemini / OpenRouter.
+Claude), driven from a friendly shell with a fresh workspace per build and live
+per-agent progress. Runs offline (mock) or live against Anthropic / Gemini /
+OpenRouter.
 
 ### Use the shell
 
