@@ -336,6 +336,19 @@ too ("Observer, explain why X").
   budget-exhaustion).
 - Every directive is an event → **auditable by the Observer** for free.
 
+### Spokesbot broker (talk without pausing) — implemented (M11)
+
+Talking to an agent must never pause its work. The **Broker**
+(`pixibot/interaction.py`) snapshots the target agent's context from the
+blackboard up to now and spins a **cheap, read-only spokesbot** (Haiku —
+cheapest per token; effort/adaptive-thinking off, which Haiku requires) briefed
+with that snapshot to converse with the user. The working agent is untouched.
+Steering stays separate and non-blocking: `tell()` posts a `directive` event the
+agent consumes at its next step. The CLI (`pixibot/cli.py`, `python -m pixibot`)
+is a chatbot over a run's blackboard — TPM by default, `@<id>` to talk to any
+agent, `/tell` to steer, `/build` to plan+run. Offline (no key) it shows the
+context snapshot; with a key each agent gets a live Haiku spokesperson.
+
 ---
 
 ## 13. Blackboard substrate & schema
@@ -464,6 +477,7 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 32. **Concurrency:** `scope` = write-lock; parallel where disjoint, serialized where overlapping (SQLite transactional).
 33. **Standards injection = hybrid** progressive disclosure; **enforcement = mechanical gates** at checkpoints before the human demo.
 34. **Schema defaults:** one DB file per run; `payload` TEXT (v0); broadcast `to_agent='*'` supported.
+35. **Interaction layer (M11):** talking to an agent never pauses it — a Broker snapshots its blackboard context and spins a cheap read-only Haiku spokesbot for the chat; steering is a separate non-blocking `directive`. CLI is a chatbot (`python -m pixibot`): TPM default, `@<id>` addressing, `/tell`, `/build`.
 
 ---
 
@@ -489,7 +503,8 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 (§13), context-manager (§9), input/projection schemas + repair loop (§6/§7),
 agent runtime with a `Model` abstraction (§9), agent factory, TPM (§7),
 orchestrator (§5), full offline pipeline (`pixibot/run.py`), Docker executor +
-local fallback (§11), Observer (§11), mechanical checkpoint gate (§10).
+local fallback (§11), Observer (§11), mechanical checkpoint gate (§10), and the
+chatbot CLI + spokesbot broker (§12, M11).
 
 **Coded but not yet exercised:** the real-Claude path (`AnthropicModel`,
 `anthropic_*` factories) — needs the `anthropic` SDK installed and

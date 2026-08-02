@@ -20,6 +20,19 @@ Run the offline demo:
 python3 -m pixibot.run        # prints an Observer report for a mock run
 ```
 
+### Chat with it (CLI)
+
+```bash
+python3 -m pixibot            # chatbot: TPM by default
+```
+
+Inside the chat: `/build <objective>` to plan+run, `@<agent> <question>` to talk
+to a specific agent (via a cheap read-only *spokesbot* that never pauses the
+working agent), `/tell <agent> <directive>` to steer (non-blocking), `/agents`,
+`/report`, `/quit`. Offline it shows each agent's context snapshot; with
+`ANTHROPIC_API_KEY` set, spokesbots become live Haiku conversations and `/build`
+plans against real Claude.
+
 ## Layout
 
 - `pixibot/` — the harness package
