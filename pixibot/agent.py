@@ -86,9 +86,13 @@ class ReasoningAgent:
             return f"error running {tc.name}: {exc}"
 
     # -- the activation loop -------------------------------------------------
+    # roles whose turn is worthless unless they leave a file behind
+    _PRODUCER_ROLES = ("topology", "lld", "programmer", "tester")
+
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
         before = self.workspace.snapshot() if self.workspace is not None else None
         messages = self._initial_messages(bb, events)
+        nudged = False
         for _ in range(self.max_iters):
             resp = self.model.generate(
                 system=self.system_prompt, messages=messages, tools=self.tool_defs
@@ -99,6 +103,16 @@ class ReasoningAgent:
                 self._emit("tool", f"{tc.name}({self._tool_summary(tc.input)})")
             messages.append({"role": "assistant", "content": self._assistant_content(resp)})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
+                if self._needs_nudge(before, nudged):
+                    nudged = True
+                    messages.append({"role": "user", "content":
+                        "You are about to end your turn without creating any file in the "
+                        "workspace. Your role's deliverable IS a file. The workspace being "
+                        "empty is normal — YOU create the initial files. Stop exploring and "
+                        "write your deliverable NOW with write_artifact(section=<path>, "
+                        "content=<full file contents>). Do not just describe it."})
+                    self._emit("say", "(nudged: no file produced yet — writing deliverable)")
+                    continue
                 break
             results = []
             for tc in resp.tool_calls:
@@ -110,6 +124,14 @@ class ReasoningAgent:
             messages.append({"role": "user", "content": results})
         self._log_file_changes(bb, before)
         return STATE_DONE
+
+    def _needs_nudge(self, before, already_nudged: bool) -> bool:
+        """A producing role that has written nothing this turn gets one push."""
+        if already_nudged or self.workspace is None:
+            return False
+        if self.role not in self._PRODUCER_ROLES:
+            return False
+        return not self.workspace.changed_since(before)
 
     def _emit(self, kind: str, detail: str) -> None:
         if self.on_event:

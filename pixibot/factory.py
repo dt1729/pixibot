@@ -23,7 +23,11 @@ ROLE_BRIEFS = {
         "  • the sequence of work so later agents aren't blocked.\n"
         "Write your decisions to a single architecture file (e.g. write_artifact with "
         "section='ARCHITECTURE.md') so every downstream agent can read it. Be concrete: "
-        "name the files that will exist and the exact function/class signatures at the seams."
+        "name the files that will exist and the exact function/class signatures at the seams. "
+        "Do NOT try to install system packages, apt/pip anything, or run long environment "
+        "probes — assume a standard Python environment. If the project needs third-party "
+        "libraries, just RECORD them (e.g. a requirements.txt via write_artifact). Your only "
+        "deliverable is the architecture file, and your turn is not done until you've written it."
     ),
     "lld": (
         "ROLE: Low-level design for a single feature.\n"
@@ -42,7 +46,10 @@ ROLE_BRIEFS = {
         "  • no premature abstraction — implement exactly what's needed, well;\n"
         "  • follow the interfaces/handshakes exactly so other features integrate;\n"
         "  • idiomatic, readable code with docstrings on public functions.\n"
-        "Create real files with write_artifact (section = the file path). Keep going until the "
+        "The workspace may be EMPTY when you start — that is normal; YOU create the files. Do "
+        "not go hunting through other directories for context: everything you need is in your "
+        "input and the workspace. Create real files with write_artifact (section = the file "
+        "path). Your turn is not complete until the code exists on disk — keep going until the "
         "feature is fully implemented, then stop."
     ),
     "tester": (
@@ -84,6 +91,11 @@ _WORKFLOW = (
     "  • write_artifact(section=<file path>, content=<full contents>) to create or replace a file.\n"
     "  • run_bash(command) to run code or tests inside the workspace.\n"
     "  • send_message(to=<agent id>, content=...) only to ask a specific peer a question.\n"
+    "CONFINEMENT: You are locked to this one workspace directory. You cannot and must not read "
+    "or touch anything outside it (no parent directories, no /home, no other projects, no system "
+    "files) — such commands are refused. Everything you need is your input plus the files here; "
+    "spend at most a couple of run_bash calls orienting, then DO THE WORK. Excessive exploration "
+    "with no files produced is a failure.\n"
     "The harness hands control to the next agent automatically when you finish — you do NOT "
     "need to message the next agent. Do the work your role owns, leave the workspace in a good "
     "state for whoever comes next, then stop. Report what you did in one or two sentences."

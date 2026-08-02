@@ -39,6 +39,33 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("from workspace", out)
 
+    def test_run_refuses_parent_traversal(self):
+        rc, out = self.ws.run("cat ../../etc/hostname")
+        self.assertEqual(rc, 126)
+        self.assertIn("confined", out)
+
+    def test_run_refuses_absolute_home(self):
+        rc, out = self.ws.run("cat /home/someone/secret.txt")
+        self.assertEqual(rc, 126)
+
+    def test_run_refuses_key_file(self):
+        rc, out = self.ws.run("cat ant_key.txt")
+        self.assertEqual(rc, 126)
+
+    def test_run_scrubs_secrets_from_env(self):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-should-not-leak"
+        try:
+            rc, out = self.ws.run("env")
+            self.assertEqual(rc, 0)
+            self.assertNotIn("sk-should-not-leak", out)
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    def test_run_home_is_workspace(self):
+        rc, out = self.ws.run("echo $HOME")
+        self.assertEqual(rc, 0)
+        self.assertIn(os.path.realpath(self.root), os.path.realpath(out.strip()))
+
 
 if __name__ == "__main__":
     unittest.main()

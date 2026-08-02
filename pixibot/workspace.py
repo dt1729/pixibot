@@ -7,10 +7,26 @@ on disk (not just blackboard text). All paths are confined to the workspace root
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
 _IGNORE = ("__pycache__", ".pytest_cache", ".git")
+
+# Any env var whose name contains one of these is stripped from the child shell,
+# so a wandering agent can never read an API key/token out of the environment.
+_SECRET_HINTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL",
+                 "ANTHROPIC", "OPENAI", "GEMINI", "OPENROUTER", "GROQ", "AWS")
+
+# Commands matching any of these are refused: they try to leave the workspace
+# (parent traversal, absolute paths into the user's home/system) or read the key
+# file. This keeps agents focused on their own project and off the rest of the box.
+_ESCAPE_PATTERNS = (
+    re.compile(r"(^|[\s;&|(\"'/])\.\.(/|$|[\s;&|)\"'])"),  # .. traversal
+    re.compile(r"/home/|/root\b|/etc/|/mnt/|/var/|/proc/"),  # absolute system paths
+    re.compile(r"\bcd\s+/"),                                  # absolute cd
+    re.compile(r"ant_key|\.bash_history|\.ssh\b|id_rsa"),     # secret-ish targets
+)
 
 
 class Workspace:
@@ -86,8 +102,34 @@ class Workspace:
             entries.append(name + ("/" if os.path.isdir(os.path.join(full, name)) else ""))
         return entries
 
+    def _clean_env(self) -> dict:
+        """Child environment with secrets removed and HOME/TMP pinned to the
+        workspace, so `~`/`$HOME`/temp all resolve inside the project."""
+        env = {k: v for k, v in os.environ.items()
+               if not any(h in k.upper() for h in _SECRET_HINTS)}
+        env["HOME"] = self.root
+        env["TMPDIR"] = self.root
+        env["PWD"] = self.root
+        return env
+
+    @staticmethod
+    def _escape_reason(command: str):
+        for pat in _ESCAPE_PATTERNS:
+            if pat.search(command):
+                return ("refused: this command tries to leave your workspace. You are "
+                        "confined to your project directory — work only with files here "
+                        "(relative paths). Do not read other projects or system files.")
+        return None
+
     def run(self, command: str, timeout: int = 120):
-        """Run a shell command in the workspace. Returns (returncode, output)."""
-        p = subprocess.run(command, shell=True, cwd=self.root,
+        """Run a shell command confined to the workspace. Returns (rc, output).
+
+        The command runs with cwd + HOME + TMPDIR pinned to the workspace root and
+        with all secret-bearing env vars stripped; commands that try to escape the
+        tree (parent traversal, absolute system paths, key files) are refused."""
+        reason = self._escape_reason(command)
+        if reason is not None:
+            return 126, reason
+        p = subprocess.run(command, shell=True, cwd=self.root, env=self._clean_env(),
                            capture_output=True, text=True, timeout=timeout)
         return p.returncode, (p.stdout + p.stderr)

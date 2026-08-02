@@ -1,12 +1,14 @@
 """Tests for the ReasoningAgent tool loop (MockModel — no API needed)."""
 
 import os
+import shutil
 import tempfile
 import unittest
 
 from pixibot.agent import ReasoningAgent
 from pixibot.blackboard import Blackboard
 from pixibot.model import MockModel, ModelResponse, ToolCall
+from pixibot.workspace import Workspace
 
 
 class AgentTest(unittest.TestCase):
@@ -57,6 +59,36 @@ class AgentTest(unittest.TestCase):
         agent.runner(self.bb, "prog", self.bb.poll_inbox("prog"))
 
         self.assertIn("microservices", seen["content"])  # read was injected into context
+
+    def test_producer_is_nudged_when_it_writes_nothing(self):
+        """A programmer that tries to finish without creating a file gets pushed to
+        write one before the turn is accepted."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        model = MockModel([
+            ModelResponse(text="I looked around, nothing to do.", stop_reason="end_turn"),
+            ModelResponse(
+                tool_calls=[ToolCall("t1", "write_artifact",
+                                     {"section": "app.py", "content": "print('hi')"})],
+                stop_reason="tool_use"),
+            ModelResponse(text="done", stop_reason="end_turn"),
+        ])
+        agent = ReasoningAgent("dev", model, role="programmer", workspace=Workspace(root))
+        self.bb.register_agent("dev")
+        self.bb.send("user", "build an app", to="dev")
+        agent.runner(self.bb, "dev", self.bb.poll_inbox("dev"))
+        self.assertEqual(agent.workspace.read_file("app.py"), "print('hi')")
+
+    def test_nonproducer_not_nudged(self):
+        """A reviewer with nothing to write is allowed to finish empty (no nudge)."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        model = MockModel([ModelResponse(text="looks fine", stop_reason="end_turn")])
+        agent = ReasoningAgent("rev", model, role="reviewer", workspace=Workspace(root))
+        self.bb.register_agent("rev")
+        self.bb.send("user", "review", to="rev")
+        agent.runner(self.bb, "rev", self.bb.poll_inbox("rev"))  # must not raise/hang
+        self.assertEqual(agent.workspace.list_files(), [])
 
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
