@@ -12,55 +12,45 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 
 | Command | What it does |
 |---|---|
-| `python3 -m pixibot` | Start the chatbot (talking to the TPM) |
-| `python3 -m pixibot --objective "..."` | Build the objective, then drop into chat |
-| `python3 -m pixibot --db run.db` | Use a specific blackboard file |
+| `python3 -m pixibot` | Start the shell (talks to the project overseer) |
+| `python3 -m pixibot --provider anthropic` | Force a provider (anthropic\|gemini\|openrouter\|offline) |
+| `python3 -m pixibot --objective "..."` | Build the objective, then drop into the shell |
 | `python3 -m pixibot.run` | Offline demo — print an Observer report |
 | `python3 -m unittest discover -s tests -t .` | Run the test suite |
 
-**Inside the chat:**
+**Inside the shell** — bare words, no slash; **↑/↓ recall history**, left/right edit:
 
 | Command | What it does |
 |---|---|
-| `<text>` | Talk to the current agent (default: `tpm`) |
-| `@<agent> <text>` | Talk to a specific agent's spokesbot (never pauses it) |
-| `@<agent>` | Switch the current agent |
-| `/at <agent>` | Switch the current agent |
-| `/build <objective>` | Plan + run a build |
-| `/revise <feedback>` | Re-plan from demo feedback (adds/changes agents) |
-| `/tell <agent> <text>` | Send a non-blocking steering directive |
-| `/hard [on\|off]` | Toggle hard-development routing (principal → Fable 5) |
-| `/provider [name]` | Switch model provider (anthropic \| gemini \| openrouter \| offline) |
-| `/form` | Show the build-request intake form |
-| `/agents` | List agents on the blackboard |
-| `/report` | Print the Observer run report |
-| `/help` | Show help |
-| `/quit` | Exit |
+| `ls [dir]` · `cd <dir>` · `pwd` · `cat <file>` · `tree` | navigate the project files |
+| `build <objective>` | plan + run a build |
+| `build-from <file.md>` | build from a filled intake form (`form` shows it) |
+| `revise <feedback>` | re-plan from feedback |
+| `tell <agent> <msg>` | non-blocking steering directive |
+| `ask <agent> <question>` | ask an agent's spokesperson (never pauses it) |
+| `status` · `agents` · `report` | project status · agent list · full run report |
+| `provider [name]` · `hard [on\|off]` | switch model provider · hard-dev routing |
+| `help` · `clear` · `exit` | help · clear screen · leave |
+| *anything else* | a question to the project overseer |
 
 ## Status
 
-Milestones **M1–M10 complete**, 42 unit tests green — see `DESIGN.md` §16. The
-full pipeline runs offline against a mock model; the real-Claude path is wired
-but needs the SDK + an API key.
+Milestones **M1–M16 complete**, 87 unit tests green — see `DESIGN.md` §16. It
+builds real, tested code on disk with a multi-agent team (verified live on
+Claude), driven from a friendly shell. Runs offline (mock) or live against
+Anthropic / Gemini / OpenRouter.
 
-Run the offline demo:
-
-```bash
-python3 -m pixibot.run        # prints an Observer report for a mock run
-```
-
-### Chat with it (CLI)
+### Use the shell
 
 ```bash
-python3 -m pixibot            # chatbot: TPM by default
+python3 -m pixibot            # opens the shell; talks to the overseer by default
 ```
 
-Inside the chat: `/build <objective>` to plan+run, `@<agent> <question>` to talk
-to a specific agent (via a cheap read-only *spokesbot* that never pauses the
-working agent), `/tell <agent> <directive>` to steer (non-blocking), `/agents`,
-`/report`, `/quit`. Offline it shows each agent's context snapshot; with
-`ANTHROPIC_API_KEY` set, spokesbots become live Haiku conversations and `/build`
-plans against real Claude.
+Navigate with `ls`/`cd`/`cat`; `build <objective>` to plan + run; `ask <agent>
+<q>` to interrogate an agent (read-only spokesbot, never pauses it); `tell
+<agent> <msg>` to steer; `revise <feedback>` to iterate. ↑/↓ recall history.
+Offline it runs a canned multi-agent mock; with a provider key it runs live and
+streams.
 
 ## Providers
 
