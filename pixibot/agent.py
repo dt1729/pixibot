@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .blackboard import Blackboard, Event
+from .blackboard import KIND_ARTIFACT, Blackboard, Event
 from .context_manager import STATE_DONE
 from .model import Model, ModelResponse
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
@@ -85,6 +85,7 @@ class ReasoningAgent:
 
     # -- the activation loop -------------------------------------------------
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
+        before = self.workspace.snapshot() if self.workspace is not None else None
         messages = self._initial_messages(bb, events)
         for _ in range(self.max_iters):
             resp = self.model.generate(
@@ -101,4 +102,18 @@ class ReasoningAgent:
                     "content": self._run_tool(tc, bb),
                 })
             messages.append({"role": "user", "content": results})
+        self._log_file_changes(bb, before)
         return STATE_DONE
+
+    def _log_file_changes(self, bb: Blackboard, before) -> None:
+        """Record every file this agent created/changed as an artifact — however it
+        wrote them (write_artifact OR run_bash) — so the blackboard/Observer see them."""
+        if self.workspace is None:
+            return
+        for path in self.workspace.changed_since(before):
+            content = self.workspace.read_file(path)
+            try:
+                bb.send(self.agent_id, content if content is not None else "",
+                        kind=KIND_ARTIFACT, section=path, enforce_scope=False)
+            except Exception:  # never let logging break the run
+                pass

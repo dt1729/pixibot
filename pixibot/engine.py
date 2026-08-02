@@ -40,7 +40,8 @@ class Engine:
         self.max_steps = max_steps
         self.cm: Optional[ContextManager] = None
         self.projection: Optional[dict] = None
-        self.on_activation = None  # live-progress hook, forwarded to the context-manager
+        self.on_activation = None  # live-progress hook (agent finished)
+        self.on_agent_start = None  # live-progress hook (agent started)
         self.workspace = None      # real project dir; created on first build
 
     def _ensure_workspace(self):
@@ -53,11 +54,13 @@ class Engine:
         return self.workspace
 
     def build(self, inp: dict) -> dict:
+        self._ensure_workspace().clear()   # fresh workspace so old runs can't poison this one
         self.projection = tpm.plan(inp, self.tpm_model)
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
         self.cm.on_activation = self.on_activation
+        self.cm.on_agent_start = self.on_agent_start
         orchestrator.materialize(self.projection, self.bb, self.cm,
-                                 self.model_factory, self._ensure_workspace())
+                                 self.model_factory, self.workspace)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
         return {"projection": self.projection, "steps": steps, "workspace": self.workspace.root}

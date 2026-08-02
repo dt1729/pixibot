@@ -73,10 +73,12 @@ def default_tool_impls() -> dict:
     def write_artifact(agent, bb, inp):
         ws = getattr(agent, "workspace", None)
         if ws is not None:
+            # Write the real file; the agent logs all file changes to the blackboard
+            # after its turn (so run_bash-written files are captured too, once).
             ws.write_file(inp["section"], inp["content"])
+            return f"wrote {inp['section']} ({len(inp['content'])} chars)"
         bb.send(agent.agent_id, inp["content"], kind=KIND_ARTIFACT, section=inp["section"])
-        where = "workspace + blackboard" if ws is not None else "blackboard"
-        return f"wrote {inp['section']} ({len(inp['content'])} chars) to {where}"
+        return f"wrote {inp['section']} ({len(inp['content'])} chars) to blackboard"
 
     def read_file(agent, bb, inp):
         ws = getattr(agent, "workspace", None)

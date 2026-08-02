@@ -59,7 +59,8 @@ class ChatSession:
         self.cwd = ""                # workspace-relative current dir
         self.hard = False
         self.engine = None
-        self.progress = None
+        self.progress = None        # agent finished
+        self.progress_start = None  # agent started
         self.provider_builder = provider_builder
         self.provider_name = provider_name
 
@@ -142,8 +143,12 @@ class ChatSession:
     def _start_engine(self, objective):
         self.engine = self.engine_factory(self.hard, objective)
         self.engine.on_activation = self.progress
+        self.engine.on_agent_start = self.progress_start
+        self.cwd = ""  # fresh build wipes the workspace; go back to root
         if self.workspace is not None:
             self.engine.workspace = self.workspace
+        if self.progress_start:
+            console.write(console.c("  … planning the team (TPM)\n", "dim"))
 
     def _built_msg(self, res):
         return (f"Built in {res['steps']} step(s). Agents: "
@@ -338,10 +343,16 @@ def _auto_provider_name():
     return "offline"
 
 
+def _progress_start(agent_id):
+    console.write(f"  {console.c('▸', 'yellow')} {console.label(agent_id)} "
+                  f"{console.c('working…', 'dim')}\n")
+
+
 def _progress(agent_id, terminal, wrote):
     tag = console.label(agent_id)
     if wrote:
-        console.write(f"  {console.c('◉', 'green')} {tag} → {console.c(', '.join(wrote), 'cyan')}\n")
+        shown = ", ".join(wrote[:6]) + (f" (+{len(wrote) - 6} more)" if len(wrote) > 6 else "")
+        console.write(f"  {console.c('◉', 'green')} {tag} → {console.c(shown, 'cyan')}\n")
     else:
         console.write(f"  {console.c('•', 'gray')} {tag} {console.c(terminal.lower(), 'dim')}\n")
 
@@ -375,6 +386,7 @@ def main(argv=None) -> None:
                           provider_builder=lambda n: _make_provider(bb, n), provider_name=name)
     if use_real:
         session.progress = _progress
+        session.progress_start = _progress_start
 
     print(console.banner())
     print(console.c(f"provider: {label}   ·   'help' for commands  ·  ↑/↓ history  ·  'exit' to leave", "dim"))
@@ -399,11 +411,8 @@ def main(argv=None) -> None:
             session.broker.talk("tpm", s, on_delta=console.write)
             console.write("\n")
             return True
-        if use_real and first in HEAVY:
-            with console.Spinner("agents working"):
-                out = session.handle(s)
-        else:
-            out = session.handle(s)
+        # No blind spinner for builds — live per-agent progress prints instead.
+        out = session.handle(s)
         if out == "__quit__":
             return False
         if out == "__clear__":

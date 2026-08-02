@@ -40,8 +40,9 @@ class ContextManager:
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
         self._deps: dict[str, set] = {}                    # agent_id -> set of agent_ids it needs
         self._done: set[str] = set()                       # agents that have completed
-        # Optional live-progress hook: on_activation(agent_id, terminal_state, wrote_sections)
-        self.on_activation = None
+        # Optional live-progress hooks.
+        self.on_activation = None       # on_activation(agent_id, terminal_state, wrote_sections)
+        self.on_agent_start = None      # on_agent_start(agent_id)
 
     # -- registration --------------------------------------------------------
     def register(self, agent_id: str, runner: AgentRunner, **agent_kwargs) -> None:
@@ -88,6 +89,8 @@ class ContextManager:
             activated += 1
             since = self.bb.latest_event_id()
             self.bb.set_state(agent_id, STATE_ACTIVE)
+            if self.on_agent_start:
+                self.on_agent_start(agent_id)
             terminal = runner(self.bb, agent_id, events) or STATE_DONE
             self.bb.set_state(agent_id, terminal)
             self._route_new_artifacts(agent_id, since)
