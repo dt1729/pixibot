@@ -8,6 +8,31 @@ de-obfuscates decisions.
 
 See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `python3 -m pixibot` | Start the chatbot (talking to the TPM) |
+| `python3 -m pixibot --objective "..."` | Build the objective, then drop into chat |
+| `python3 -m pixibot --db run.db` | Use a specific blackboard file |
+| `python3 -m pixibot.run` | Offline demo — print an Observer report |
+| `python3 -m unittest discover -s tests -t .` | Run the test suite |
+
+**Inside the chat:**
+
+| Command | What it does |
+|---|---|
+| `<text>` | Talk to the current agent (default: `tpm`) |
+| `@<agent> <text>` | Talk to a specific agent's spokesbot (never pauses it) |
+| `@<agent>` | Switch the current agent |
+| `/at <agent>` | Switch the current agent |
+| `/build <objective>` | Plan + run a build |
+| `/tell <agent> <text>` | Send a non-blocking steering directive |
+| `/agents` | List agents on the blackboard |
+| `/report` | Print the Observer run report |
+| `/help` | Show help |
+| `/quit` | Exit |
+
 ## Status
 
 Milestones **M1–M10 complete**, 42 unit tests green — see `DESIGN.md` §16. The
