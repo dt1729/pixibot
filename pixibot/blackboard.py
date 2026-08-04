@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS agents (
     state    TEXT,
     budget   TEXT
 );
+
+-- Per-agent conversation transcript, so a re-activated agent resumes with full
+-- memory (stateful agents). Keyed by run_id so builds stay isolated.
+CREATE TABLE IF NOT EXISTS memory (
+    run_id     TEXT NOT NULL,
+    agent_id   TEXT NOT NULL,
+    transcript TEXT NOT NULL,
+    PRIMARY KEY (run_id, agent_id)
+);
 """
 
 
@@ -125,8 +134,28 @@ class Blackboard:
         with self._lock:
             self._db.execute("DELETE FROM agents")
             self._db.execute("DELETE FROM cursors")
+            self._db.execute("DELETE FROM memory")
             self._db.commit()
         self.run_id = run_id
+
+    def save_memory(self, agent_id: str, transcript: str) -> None:
+        """Persist an agent's conversation transcript for the current run."""
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO memory(run_id, agent_id, transcript) VALUES(?,?,?) "
+                "ON CONFLICT(run_id, agent_id) DO UPDATE SET transcript=excluded.transcript",
+                (self.run_id, agent_id, transcript),
+            )
+            self._db.commit()
+
+    def load_memory(self, agent_id: str) -> Optional[str]:
+        """Return an agent's stored transcript for the current run, or None."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT transcript FROM memory WHERE run_id=? AND agent_id=?",
+                (self.run_id, agent_id),
+            ).fetchone()
+        return row["transcript"] if row else None
 
     # ── agent registry (mutable) ────────────────────────────────────────────
     def register_agent(self, agent_id: str, *, role: Optional[str] = None,

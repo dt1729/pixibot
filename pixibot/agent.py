@@ -10,6 +10,7 @@ Its ``runner`` method plugs directly into ``ContextManager``.
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from .blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
@@ -37,10 +38,12 @@ class ReasoningAgent:
         max_iters: int = 14,
         workspace=None,
         on_event=None,
+        objective: str = "",
     ):
         self.agent_id = agent_id
         self.model = model
         self.system_prompt = system_prompt
+        self.objective = objective  # the run's goal — persists across ALL activations
         self.role = role
         self.depth = depth
         self.scope = scope
@@ -54,6 +57,11 @@ class ReasoningAgent:
     # -- context rebuild (stateless) -----------------------------------------
     def _initial_messages(self, bb: Blackboard, events: list[Event]) -> list[dict]:
         parts: list[str] = []
+        if self.objective:
+            # Re-stated every activation so a re-woken stateless agent never forgets
+            # what the team is building (a status ping must not reset the goal).
+            parts.append("PROJECT OBJECTIVE (what this whole team is building — this holds "
+                         f"for every one of your activations, do NOT invent a new task):\n{self.objective}")
         for e in events:
             tag = e.kind if e.kind != "message" else f"from {e.from_agent}"
             parts.append(f"[{tag}] {e.payload}")
@@ -100,7 +108,17 @@ class ReasoningAgent:
 
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
         before = self.workspace.snapshot() if self.workspace is not None else None
-        messages = self._initial_messages(bb, events)
+        # Stateful: resume this agent's own transcript so it remembers what it did
+        # and why across activations; a fresh activation just starts a new one.
+        prior = bb.load_memory(agent_id)
+        if prior:
+            try:
+                messages = json.loads(prior)
+                messages.append(self._initial_messages(bb, events)[0])  # latest inbox+state
+            except (ValueError, IndexError):
+                messages = self._initial_messages(bb, events)
+        else:
+            messages = self._initial_messages(bb, events)
         last_text = self._tool_loop(bb, messages, self.max_iters)
         # Guarantee delivery: if a producing role wrote nothing — whether it stopped
         # early OR ran out of iterations exploring — force one dedicated delivery pass.
@@ -108,9 +126,16 @@ class ReasoningAgent:
             messages.append({"role": "user", "content": self._NUDGE})
             self._emit("say", "(nudged: no file produced — forcing deliverable)")
             last_text = self._tool_loop(bb, messages, max(4, self.max_iters // 2)) or last_text
+        self._persist_memory(bb, messages)
         self._log_file_changes(bb, before)
         self._report_completion(bb, before, last_text)
         return STATE_DONE
+
+    def _persist_memory(self, bb: Blackboard, messages: list[dict]) -> None:
+        try:
+            bb.save_memory(self.agent_id, json.dumps(messages))
+        except Exception:  # memory is best-effort; never fail the run over it
+            _log.exception("%s: failed to persist memory", self.agent_id)
 
     def _tool_loop(self, bb: Blackboard, messages: list[dict], iters: int) -> str:
         """Run model→tool turns until the model stops calling tools or `iters` runs out.

@@ -44,7 +44,7 @@ def infer_deps(projection: dict) -> dict:
 
 
 def register_one(spec: dict, bb: Blackboard, cm: ContextManager,
-                 model_factory: ModelFactory, workspace=None, on_event=None):
+                 model_factory: ModelFactory, workspace=None, on_event=None, objective=""):
     budget = spec.get("budget", {})
     depth = budget.get("depth", "senior")
     scope = budget.get("scope")
@@ -52,17 +52,19 @@ def register_one(spec: dict, bb: Blackboard, cm: ContextManager,
     model = model_factory(spec)
     agent = make_agent(spec["id"], role=spec.get("role", "specialist"),
                        depth=depth, model=model, scope=scope, reads=reads,
-                       workspace=workspace, on_event=on_event)
+                       workspace=workspace, on_event=on_event, objective=objective)
     cm.register(agent.agent_id, agent.runner, role=agent.role, depth=depth,
                 model=getattr(model, "model_id", None), scope=scope, budget=budget)
     return agent
 
 
 def materialize(projection: dict, bb: Blackboard, cm: ContextManager,
-                model_factory: ModelFactory, workspace=None, on_event=None) -> ContextManager:
+                model_factory: ModelFactory, workspace=None, on_event=None,
+                objective="") -> ContextManager:
     deps = infer_deps(projection)
+    objective = objective or projection.get("plan_summary", "")
     for spec in projection["agents"]:
-        register_one(spec, bb, cm, model_factory, workspace, on_event)
+        register_one(spec, bb, cm, model_factory, workspace, on_event, objective)
         cm.set_deps(spec["id"], deps.get(spec["id"], set()))
     return cm
 

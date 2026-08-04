@@ -46,6 +46,13 @@ class BlackboardTest(unittest.TestCase):
         # the sender is NOT woken by its own broadcast (no self-wake loop)
         self.assertEqual(self.bb.poll_inbox("tester"), [])
 
+    def test_memory_roundtrip_and_reset_clears_it(self):
+        self.bb.save_memory("architect", '[{"role":"user","content":"hi"}]')
+        self.assertEqual(self.bb.load_memory("architect"),
+                         '[{"role":"user","content":"hi"}]')
+        self.bb.reset_run("b2")
+        self.assertIsNone(self.bb.load_memory("architect"))  # wiped + new run namespace
+
     def test_reset_run_isolates_new_build(self):
         self.bb.register_agent("old_agent")
         self.bb.send("old_agent", "stale", to="tpm")

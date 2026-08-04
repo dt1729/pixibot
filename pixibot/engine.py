@@ -80,8 +80,9 @@ class Engine:
         self.cm = ContextManager(self.bb, max_steps=self.max_steps)
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
+        objective = self.projection.get("plan_summary") or inp.get("objective", "")
         orchestrator.materialize(self.projection, self.bb, self.cm,
-                                 self.model_factory, self.workspace, self.on_event)
+                                 self.model_factory, self.workspace, self.on_event, objective)
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
         _log.info("BUILD done run=%s steps=%d files=%d",
@@ -107,9 +108,10 @@ class Engine:
         self.projection = tpm.revise(self.projection, feedback, self.tpm_model)
         deps = orchestrator.infer_deps(self.projection)
         new = [s for s in self.projection["agents"] if not self.cm.is_registered(s["id"])]
+        objective = self.projection.get("plan_summary", "")
         for spec in new:
             orchestrator.register_one(spec, self.bb, self.cm, self.model_factory,
-                                      self._ensure_workspace(), self.on_event)
+                                      self._ensure_workspace(), self.on_event, objective)
             # only depend on agents that already completed, so new agents can start
             self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm._done)
         for spec in new:

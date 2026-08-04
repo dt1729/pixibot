@@ -139,6 +139,32 @@ class AgentTest(unittest.TestCase):
         agent.runner(self.bb, "architect", self.bb.poll_inbox("architect"))
         self.assertEqual(calls["n"], 1)  # one turn only — no forced delivery loop
 
+    def test_objective_persists_and_agent_is_stateful(self):
+        """The objective is present on the first activation AND after a re-wake by a
+        bare status ping, and the transcript is remembered (stateful)."""
+        seen = {}
+
+        def cap(messages):
+            seen["first"] = messages[0]["content"] if messages else ""
+            seen["len"] = len(messages)
+            return ModelResponse(text="ok", stop_reason="end_turn")
+
+        agent = ReasoningAgent("arch", MockModel([cap, cap]), role="reviewer",
+                               objective="Build a PyQt video viewer")
+        self.bb.register_agent("arch")
+
+        self.bb.send("user", "begin", to="arch")
+        agent.runner(self.bb, "arch", self.bb.poll_inbox("arch"))
+        self.assertIn("Build a PyQt video viewer", seen["first"])
+        first_len = seen["len"]
+        self.assertIsNotNone(self.bb.load_memory("arch"))  # transcript saved
+
+        # re-wake with ONLY a status ping — the goal must survive, context resumes
+        self.bb.send("user", "what's the update", to="arch")
+        agent.runner(self.bb, "arch", self.bb.poll_inbox("arch"))
+        self.assertIn("Build a PyQt video viewer", seen["first"])  # not amnesiac
+        self.assertGreater(seen["len"], first_len)                 # resumed prior transcript
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),
