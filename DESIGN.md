@@ -1,6 +1,6 @@
 # Pixibot — Multi-Agent Software-Development System (Design)
 
-> Status: **living design doc** (pre-implementation). No code yet by intent.
+> Status: **living design doc** — implemented through **M25** (see §14/§16).
 > Authors: the user + Claude (harness/MoA developers). The **TPM agent** is a
 > third author at runtime — it writes projection instances (see §5).
 
@@ -224,10 +224,17 @@ plan time. No idle objects, no wasted context.
 An active agent runs its own loop (think → call tools → read/write blackboard)
 until it hits a terminal state above.
 
-### Context handling (locked)
+### Context handling (locked; amended M25)
 - **Rebuilt from the blackboard on each activation, not held in memory.** On
   resume, context = role prompt + standards contract + budget + the blackboard
   slices it reads + its inbox since last cursor.
+- **Amended (M25, decision 49):** an agent's *own conversation transcript* is now
+  persisted to the blackboard (`save_memory`/`load_memory`, keyed by run) and
+  resumed on re-activation, and the run objective is injected into every
+  activation. Pure statelessness caused the amnesia hallucination — a status ping
+  re-activated a blank architect that invented a new project. Coordination state
+  still lives only on the blackboard; what changed is that memory is *durable on
+  the board* rather than rebuilt from scratch.
 - **Prompt caching** keeps the re-read cheap: the stable prefix (role + standards)
   doesn't change between activations.
 - **Isolation:** an agent sees only its own scratch context + the blackboard
@@ -483,7 +490,15 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 38. **Multi-provider (M14):** `OpenAICompatModel` translates Pixibot's Anthropic-shaped messages/tools to the OpenAI chat-completions shape (+ streaming), unlocking **Gemini** (free tier), **OpenRouter**, Groq, OpenAI, and local Ollama alongside native Anthropic. The provider is chosen via `--provider` (auto-detects from env keys) or the runtime `/provider` command (anthropic | gemini | openrouter | offline).
 39. **Real files + reliable coordination (M15):** agents write actual files to a per-run **Workspace** (path-safe read/write/list + `run_bash`) via filesystem tools, and read each other's files; **deterministic dependency-chain activation** (explicit `depends_on`, else role order) makes every agent participate (fixing the "only the root ran" failure); per-agent prompts are much more verbose (role charter + workflow + handoff). **Verified live:** a real multi-agent Claude run produced a working `reverse()` module + a pytest suite, with the tester actually executing pytest. Output lands in `~/pixibot-workspace/<run>/`.
 40. **Friendly shell CLI (M16):** the CLI is a shell — `readline` **up/down command history** (persisted to `~/.pixibot_history`) + line editing; **bash-style navigation** of the workspace (`ls`/`cd`/`pwd`/`cat`/`tree`, cwd-aware & path-safe); **bare-word actions** (no slash): `build`, `build-from <file.md>`, `revise`, `tell`, `ask`, `status`, `agents`, `report`, `provider`, `hard`, `help`, `clear`, `exit`; plain text talks to a **project-wide overseer** (read-only spokesbot over all agents/files/status). `build-from` parses the markdown intake form.
-41. **Build isolation + visibility (M17):** the Engine **clears the workspace at each build start** — stale files from a prior run had poisoned a new task (a video-viewer request built a URL shortener because leftover mock files anchored the architect). Agents now log **every created/changed file** as an artifact after their turn, so files written via `run_bash` (not just `write_artifact`) show up in `status`/`report`/Observer. **Live per-agent progress** (start → finish → files) replaces the blind spinner; a planning line precedes the TPM call.
+41. **Build isolation + visibility (M17):** the Engine **clears the workspace at each build start** — stale files from a prior run had poisoned a new task (a video-viewer request built a URL shortener because leftover mock files anchored the architect). Agents now log **every created/changed file** as an artifact after their turn, so files written via `run_bash` (not just `write_artifact`) show up in `status`/`report`/Observer. **Live per-agent progress** (start → finish → files) replaces the blind spinner; a planning line precedes the TPM call. *(Superseded by decision 47: builds no longer clear a shared workspace — each gets its own.)*
+42. **Split-pane TUI (M18):** a Textual 3-pane interface — shell/input (left), build status (top-right), active-agent actions/messages (bottom-right) — with builds in a background worker so the shell stays usable; the Blackboard is made thread-safe (`check_same_thread=False` + RLock) and a per-agent event feed is threaded agent → orchestrator → engine → TUI. Default on a TTY; `--plain` forces the classic shell, `--tui` forces the TUI.
+43. **Workspace confinement + deliver-or-nudge (M19/M19.1):** diagnosed from a live build that produced 0 files (agents roamed the filesystem via `run_bash`, read sibling workspaces and even the API key file, and quit without writing). `run_bash` is now **confined to the workspace** — cwd/HOME/TMPDIR pinned to the project root, secret-bearing env vars stripped, escape paths (parent traversal, absolute paths, key files) refused. A producing role that ends its turn with no file written gets a **forced delivery pass on every exit path** (not just voluntary stops — M19.1); iteration budget raised 8 → 14.
+44. **Visible thinking (M20):** thinking blocks are captured (`ModelResponse.thinking`), rendered live in the TUI (🧠 pane), and **persisted to the blackboard as control events**; `think <agent>` reads the latest reasoning straight off the board — so a *second* Pixibot instance can probe a running one.
+45. **Transparency (M21):** agents post a **completion report** (own summary + files produced) when they finish; the overseer's snapshot includes per-agent reports + latest substantive messages so it can relay real updates; a raw `updates` command shows every agent's latest report with **no LLM in the loop**; tester charter: report SKIPPED/BLOCKED loudly — a green run that skipped a core integration test is not a pass.
+46. **Self-correction loop (M22/M22.1):** the team is a **feedback loop, not a one-way pipeline** — a tester/reviewer that finds a design-level flaw escalates to the architect (bugs go to the programmer), who reconsiders: revise `ARCHITECTURE.md` (re-triggering downstream) or reply with rationale. Messaging any agent — even a finished one — re-activates it. Mechanically: `poll_inbox` no longer returns an agent's own messages (a broadcast can't self-wake the sender into a loop), and deliver-or-nudge doesn't force-rewrite an agent that already delivered, so escalation replies are allowed.
+47. **Run isolation (M23):** every build gets a **fresh `run_id`** (`b<timestamp>`) and **its own workspace dir** (`~/pixibot-workspace/<run_id>`). `Blackboard.reset_run` clears the mutable `agents`/`cursors` tables; events stay append-only and namespaced by run, so prior runs survive on disk for audit/recovery and an accidental rebuild can no longer destroy earlier work. (Root cause: every build had reused `run_id='cli'` and one shared dir, piling agents from stacked builds into one table.)
+48. **Run log + crash safety (M24):** one append-only log at `~/.pixibot/pixibot.log` (`--log` overrides), shown in the banner/TUI header. The context-manager logs every activation + terminal state and **wraps the agent runner in try/except** — a crashing agent is logged with a full traceback and marked BLOCKED instead of hanging or killing the build; agents log each model turn (stop reason, tool counts) and every tool call.
+49. **Stateful agents + persistent objective (M25):** each agent **persists its full conversation transcript** to the blackboard (`save_memory`/`load_memory`, keyed by run) and resumes it on every re-activation; the run **objective is injected into every activation's context**, not just the first inbox message. Fixes the amnesia hallucination (a status ping re-activated a blank stateless architect, which invented a whole new project the team then built). **Amends decision 31:** coordination still flows through the append-only blackboard; only the agent's own conversation is remembered — durably, on the board.
 
 ---
 
@@ -505,23 +520,28 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 
 ## 16. Status & next steps
 
-**Implemented (M1–M10), all unit-tested (42 tests green), on `main`:** blackboard
-(§13), context-manager (§9), input/projection schemas + repair loop (§6/§7),
-agent runtime with a `Model` abstraction (§9), agent factory, TPM (§7),
+**Implemented (M1–M25), all unit-tested (103 tests green), on `main`:**
+blackboard (§13), context-manager (§9), input/projection schemas + repair loop
+(§6/§7), agent runtime with a `Model` abstraction (§9), agent factory, TPM (§7),
 orchestrator (§5), full offline pipeline (`pixibot/run.py`), Docker executor +
-local fallback (§11), Observer (§11), mechanical checkpoint gate (§10), and the
-chatbot CLI + spokesbot broker (§12, M11).
-
-**Coded but not yet exercised:** the real-Claude path (`AnthropicModel`,
-`anthropic_*` factories) — needs the `anthropic` SDK installed and
-`ANTHROPIC_API_KEY`. Everything else runs offline against `MockModel`.
+local fallback (§11), Observer (§11), mechanical checkpoint gate (§10), the
+chatbot CLI + spokesbot broker (§12, M11), multi-agent wiring + revision + the
+intake form (M12), streaming REPL (M13), multi-provider support (M14), real
+files + dependency-chain coordination — **verified live on Claude** (M15), the
+friendly shell (M16), per-build isolation + file tracking (M17), the split-pane
+TUI (M18), workspace confinement + deliver-or-nudge (M19), visible thinking
+(M20), completion reports + `updates` (M21), the self-correction loop (M22),
+fresh run + workspace per build (M23), the crash-safe run log (M24), and
+stateful agents + persistent objective (M25).
 
 **Next wiring:**
-- Human **checkpoint → demo → feedback → revision** loop into `run_pipeline`
-  (the gate exists standalone; the pause/revise cycle isn't wired yet).
-- **Multi-agent projections** with dependencies/handshakes beyond the
-  single-agent demo (topology → LLD → programmer → tester).
-- Build & use the **Docker image** for real tool execution.
+- Human **checkpoint → demo → feedback → revision** loop into the build flow
+  (the mechanical gate exists; `revise` re-plans, but the pause-at-demo cycle
+  isn't wired as a gate).
+- Build & use the **Docker image** for containerized tool execution (the local
+  fallback is what runs today; confinement currently comes from the workspace
+  guards of M19).
 - Deepen `standards/` and invoke the gate at each checkpoint.
-- A **first reference project** for a real end-to-end run (§15).
+- **Existing-codebase comprehension** (greenfield-first was decision 24; still
+  deferred).
 ```

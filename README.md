@@ -12,9 +12,11 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 
 | Command | What it does |
 |---|---|
-| `python3 -m pixibot` | Start the shell (talks to the project overseer) |
+| `python3 -m pixibot` | Start the shell (split-pane TUI on a TTY; talks to the project overseer) |
+| `python3 -m pixibot --plain` / `--tui` | Force the classic plain shell / the split-pane TUI |
 | `python3 -m pixibot --provider anthropic` | Force a provider (anthropic\|gemini\|openrouter\|offline) |
 | `python3 -m pixibot --objective "..."` | Build the objective, then drop into the shell |
+| `python3 -m pixibot --log <path>` | Run log location (default `~/.pixibot/pixibot.log`) |
 | `python3 -m pixibot.run` | Offline demo — print an Observer report |
 | `python3 -m unittest discover -s tests -t .` | Run the test suite |
 
@@ -29,17 +31,23 @@ See **[DESIGN.md](DESIGN.md)** for the full architecture and decision log.
 | `tell <agent> <msg>` | non-blocking steering directive |
 | `ask <agent> <question>` | ask an agent's spokesperson (never pauses it) |
 | `status` · `agents` · `report` | project status · agent list · full run report |
+| `updates` | latest completion report from every agent (no LLM in the loop) |
+| `think <agent>` | an agent's latest reasoning, read straight off the blackboard |
 | `provider [name]` · `hard [on\|off]` | switch model provider · hard-dev routing |
 | `help` · `clear` · `exit` | help · clear screen · leave |
 | *anything else* | a question to the project overseer |
 
 ## Status
 
-Milestones **M1–M17 complete**, 87 unit tests green — see `DESIGN.md` §16. It
+Milestones **M1–M25 complete**, 103 unit tests green — see `DESIGN.md` §16. It
 builds real, tested code on disk with a multi-agent team (verified live on
-Claude), driven from a friendly shell with a fresh workspace per build and live
-per-agent progress. Runs offline (mock) or live against Anthropic / Gemini /
-OpenRouter.
+Claude), driven from a split-pane TUI (or plain shell) with an isolated fresh
+run + workspace per build, live per-agent progress and visible agent thinking,
+a self-correction loop (tester/reviewer escalate design flaws back to the
+architect), workspace-confined `bash` (secrets stripped, no filesystem
+roaming), stateful agents that remember their conversation across
+re-activations, and a crash-safe run log. Runs offline (mock) or live against
+Anthropic / Gemini / OpenRouter.
 
 ### Use the shell
 
@@ -72,9 +80,14 @@ strongest model of the active provider.
 ## Output: real files
 
 Agents write actual files to a per-run workspace at `~/pixibot-workspace/<run>/`
-(the CLI uses run `cli`). They read each other's files and run commands there —
-e.g. the tester runs `pytest`. Coordination is a deterministic dependency chain
-(architect → programmer → tester → …) so every agent participates.
+— every build gets a fresh run id (`b<timestamp>`) and its own workspace dir, so
+an accidental rebuild can never destroy earlier work. They read each other's
+files and run commands there — e.g. the tester runs `pytest` — with `run_bash`
+confined to the workspace (secret env vars stripped, escape paths refused).
+Coordination is a deterministic dependency chain (architect → programmer →
+tester → …) so every agent participates, plus an escalation loop: a tester or
+reviewer that finds a design-level flaw re-activates the architect, whose
+revision re-triggers the downstream agents.
 
 
 ## Layout
@@ -86,9 +99,14 @@ e.g. the tester runs `pytest`. Coordination is a deterministic dependency chain
   - `model.py` — `Model` abstraction: `MockModel` (offline) / `AnthropicModel`
   - `agent.py`, `factory.py`, `tools.py` — the stateless reasoning agent (§9)
   - `tpm.py`, `orchestrator.py`, `run.py` — plan → materialize → run pipeline
+  - `engine.py` — persistent run engine: build / resume / tell / revise
+  - `workspace.py` — per-run workspace: path-safe file IO + confined `run_bash`
+  - `interaction.py` — spokesbot broker (`ask`/`tell` without pausing agents, §12)
+  - `cli.py`, `tui.py`, `console.py` — the shell, the split-pane Textual TUI, ANSI console
   - `runtime.py` — Docker-per-run executor + local fallback (§11)
   - `observer.py` — message DAG + run report (§11)
   - `gates.py`, `standards.py` — mechanical checkpoint gate + standards (§10)
+  - `logbook.py` — append-only run log at `~/.pixibot/pixibot.log` (crash-safe)
   - `config.py` — depth → model / effort mapping (§8)
 - `standards/` — versioned quality standards agents read on demand (§10)
 - `docker/` — per-run workspace image
