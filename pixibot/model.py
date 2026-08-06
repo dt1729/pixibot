@@ -67,16 +67,87 @@ class MockModel(Model):
         return item(messages) if callable(item) else item
 
 
+from .logbook import get as _get_logger
+
+_mlog = _get_logger("model")
+
+# 1-hour ephemeral cache: agents sit idle for minutes between activations, so the
+# default 5-minute TTL would expire between turns and we'd pay the write premium
+# with no read. The 1h write costs 2x but pays off within ~3 reads — which
+# continuous re-testing (A) and re-planning loops (E) hit easily.
+_CACHE_CTL = {"type": "ephemeral", "ttl": "1h"}
+
+
+def _cached_system(system):
+    """Wrap the system prompt so tools+system are cached (render order is
+    tools -> system -> messages, so a breakpoint on the last system block covers
+    both). Returns a new value; never mutates the caller's."""
+    if not system:
+        return system
+    if isinstance(system, str):
+        return [{"type": "text", "text": system, "cache_control": _CACHE_CTL}]
+    blocks = [dict(b) if isinstance(b, dict) else b for b in system]
+    if blocks and isinstance(blocks[-1], dict):
+        blocks[-1] = {**blocks[-1], "cache_control": _CACHE_CTL}
+    return blocks
+
+
+def _cached_messages(messages):
+    """Rolling breakpoint on the last block of the most recent turn, so the next
+    request reuses the whole prior-conversation prefix. Copies before marking —
+    the marker must NOT be persisted into the agent's stored transcript, or it
+    would accumulate one breakpoint per turn and blow past the 4-breakpoint cap."""
+    if not messages:
+        return messages
+    out = list(messages)
+    last = dict(out[-1])
+    content = last.get("content")
+    if isinstance(content, str):
+        last["content"] = [{"type": "text", "text": content, "cache_control": _CACHE_CTL}]
+    elif isinstance(content, list) and content and isinstance(content[-1], dict):
+        blocks = list(content)
+        blocks[-1] = {**blocks[-1], "cache_control": _CACHE_CTL}
+        last["content"] = blocks
+    else:
+        return messages  # nothing cacheable at the tail
+    out[-1] = last
+    return out
+
+
 class AnthropicModel(Model):
     """Calls real Claude. The SDK import is deferred to first use."""
 
     def __init__(self, model_id: str, *, effort: "str | None" = "high",
-                 max_tokens: int = 16000, use_thinking: bool = True):
+                 max_tokens: int = 16000, use_thinking: bool = True, use_cache: bool = True):
         self.model_id = model_id
         self.effort = effort
         self.max_tokens = max_tokens
         self.use_thinking = use_thinking  # Haiku rejects effort/adaptive thinking
+        self.use_cache = use_cache
         self._client = None
+
+    def _kwargs(self, system, messages, tools) -> dict:
+        if self.use_cache:
+            system = _cached_system(system)
+            messages = _cached_messages(messages)
+        kwargs = dict(model=self.model_id, max_tokens=self.max_tokens,
+                      system=system, tools=tools or [], messages=messages)
+        if self.use_thinking:
+            # display:"summarized" — the default is "omitted", which returns empty
+            # thinking text (so the 🧠 pane would show nothing).
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+        return kwargs
+
+    @staticmethod
+    def _log_cache(usage) -> None:
+        if usage is None:
+            return
+        read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        _mlog.info("cache read=%s write=%s uncached=%s",
+                   read, write, getattr(usage, "input_tokens", 0))
 
     def _client_lazy(self):
         if self._client is None:
@@ -87,18 +158,8 @@ class AnthropicModel(Model):
 
     def generate(self, *, system, messages, tools) -> ModelResponse:
         client = self._client_lazy()
-        kwargs = dict(
-            model=self.model_id,
-            max_tokens=self.max_tokens,
-            system=system,
-            tools=tools or [],
-            messages=messages,
-        )
-        if self.use_thinking:
-            kwargs["thinking"] = {"type": "adaptive"}
-        if self.effort:
-            kwargs["output_config"] = {"effort": self.effort}
-        resp = client.messages.create(**kwargs)
+        resp = client.messages.create(**self._kwargs(system, messages, tools))
+        self._log_cache(getattr(resp, "usage", None))
         text = ""
         thinking = ""
         tool_calls: list[ToolCall] = []
@@ -116,19 +177,14 @@ class AnthropicModel(Model):
 
     def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
         client = self._client_lazy()
-        kwargs = dict(model=self.model_id, max_tokens=self.max_tokens, system=system,
-                      tools=tools or [], messages=messages)
-        if self.use_thinking:
-            kwargs["thinking"] = {"type": "adaptive"}
-        if self.effort:
-            kwargs["output_config"] = {"effort": self.effort}
-        with client.messages.stream(**kwargs) as stream:
+        with client.messages.stream(**self._kwargs(system, messages, tools)) as stream:
             for event in stream:
                 if (event.type == "content_block_delta"
                         and getattr(event.delta, "type", "") == "text_delta"):
                     if on_delta:
                         on_delta(event.delta.text)
             msg = stream.get_final_message()
+        self._log_cache(getattr(msg, "usage", None))
         text = ""
         tool_calls: list[ToolCall] = []
         for block in msg.content:

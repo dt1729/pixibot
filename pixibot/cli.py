@@ -311,7 +311,10 @@ class ChatSession:
 # ── provider wiring ──────────────────────────────────────────────────────────
 def _anthropic_spokesbot():
     from .model import AnthropicModel
-    return AnthropicModel(config.SPOKESBOT_MODEL, effort=None, use_thinking=False, max_tokens=1024)
+    # No caching: the spokesbot's system prompt embeds a live snapshot that changes
+    # every call, so a cache write would never be read.
+    return AnthropicModel(config.SPOKESBOT_MODEL, effort=None, use_thinking=False,
+                          max_tokens=1024, use_cache=False)
 
 
 def _gemini_spokesbot():
