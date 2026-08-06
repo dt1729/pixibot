@@ -88,8 +88,11 @@ class Workspace:
         full = self._safe(path)
         if not os.path.isfile(full):
             return None
-        with open(full, encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(full, encoding="utf-8") as f:
+                return f.read()
+        except (UnicodeDecodeError, OSError):
+            return None  # binary or unreadable-as-text; callers treat as "skip"
 
     def list_files(self) -> list[str]:
         out = []

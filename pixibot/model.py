@@ -113,6 +113,32 @@ def _sanitize_messages(messages):
     return out
 
 
+def _drop_unmatched_tool_use(messages):
+    """Remove tool_use blocks not immediately followed by their tool_result (the API
+    rejects them with a 400). Defence-in-depth against a persisted transcript that
+    ended mid-tool-use before the fix in the agent loop."""
+    out = []
+    for i, m in enumerate(messages):
+        if m.get("role") == "assistant" and isinstance(m.get("content"), list):
+            tool_ids = [b.get("id") for b in m["content"]
+                        if isinstance(b, dict) and b.get("type") == "tool_use"]
+            if tool_ids:
+                nxt = messages[i + 1] if i + 1 < len(messages) else None
+                rids = set()
+                if nxt and isinstance(nxt.get("content"), list):
+                    rids = {b.get("tool_use_id") for b in nxt["content"]
+                            if isinstance(b, dict) and b.get("type") == "tool_result"}
+                if any(tid not in rids for tid in tool_ids):
+                    kept = [b for b in m["content"]
+                            if not (isinstance(b, dict) and b.get("type") == "tool_use"
+                                    and b.get("id") not in rids)]
+                    if not kept:
+                        continue
+                    m = {**m, "content": kept}
+        out.append(m)
+    return out
+
+
 def _cached_messages(messages):
     """Rolling breakpoint on the last block of the most recent turn, so the next
     request reuses the whole prior-conversation prefix. Copies before marking —
@@ -148,7 +174,8 @@ class AnthropicModel(Model):
         self._client = None
 
     def _kwargs(self, system, messages, tools) -> dict:
-        messages = _sanitize_messages(messages)  # never send empty text blocks (400)
+        messages = _sanitize_messages(messages)          # never send empty text blocks (400)
+        messages = _drop_unmatched_tool_use(messages)    # never send a dangling tool_use (400)
         if self.use_cache:
             system = _cached_system(system)
             messages = _cached_messages(messages)

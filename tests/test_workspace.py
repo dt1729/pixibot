@@ -39,6 +39,11 @@ class WorkspaceTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("from workspace", out)
 
+    def test_read_binary_file_returns_none(self):
+        with open(os.path.join(self.root, "clip.bin"), "wb") as f:
+            f.write(b"\xae\xff\x00\x10not utf-8")
+        self.assertIsNone(self.ws.read_file("clip.bin"))  # binary -> None, never raises
+
     def test_pytest_tmp_and_venv_ignored(self):
         self.ws.write_file("app.py", "x")
         self.ws.write_file("pytest-of-dt/pytest-1/junk.txt", "tmp")

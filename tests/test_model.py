@@ -6,6 +6,7 @@ from pixibot.model import (
     AnthropicModel,
     _cached_messages,
     _cached_system,
+    _drop_unmatched_tool_use,
     _sanitize_messages,
 )
 
@@ -67,6 +68,22 @@ class CacheAssemblyTest(unittest.TestCase):
                 for b in msg["content"]:
                     if b.get("type") == "text":
                         self.assertTrue(b["text"].strip(), "empty text block leaked into request")
+
+    def test_drop_dangling_tool_use(self):
+        msgs = [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {}}]},
+            {"role": "user", "content": [{"type": "text", "text": "what's the update"}]},  # no result!
+        ]
+        out = _drop_unmatched_tool_use(msgs)
+        self.assertNotIn("assistant", [m["role"] for m in out])  # dangling turn removed
+
+    def test_keep_matched_tool_use(self):
+        msgs = [
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        ]
+        self.assertEqual(len(_drop_unmatched_tool_use(msgs)), 2)  # matched pair survives
 
     def test_kwargs_no_cache_when_disabled(self):
         m = AnthropicModel("claude-haiku-4-5", use_thinking=False, use_cache=False)

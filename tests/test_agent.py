@@ -181,6 +181,28 @@ class AgentTest(unittest.TestCase):
                     self.assertFalse(b.get("type") == "text" and not b.get("text"),
                                      "empty text block persisted into transcript")
 
+    def test_tool_runs_even_when_stop_is_not_tool_use(self):
+        """max_tokens mid-tool-use must still run the tool + append its result, so no
+        dangling tool_use is persisted (the second live crash)."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        model = MockModel([ModelResponse(
+            tool_calls=[ToolCall("t1", "write_artifact", {"section": "a.py", "content": "x"})],
+            stop_reason="max_tokens")])
+        agent = ReasoningAgent("dev", model, role="reviewer", workspace=Workspace(root))
+        self.bb.register_agent("dev")
+        self.bb.send("user", "go", to="dev")
+        agent.runner(self.bb, "dev", self.bb.poll_inbox("dev"))
+        self.assertEqual(agent.workspace.read_file("a.py"), "x")  # tool actually ran
+        mem = json.loads(self.bb.load_memory("dev"))
+        for i, m in enumerate(mem):  # every tool_use is followed by a tool_result
+            if m.get("role") == "assistant" and isinstance(m["content"], list):
+                if any(b.get("type") == "tool_use" for b in m["content"]):
+                    nxt = mem[i + 1] if i + 1 < len(mem) else {}
+                    got = nxt.get("content", [])
+                    self.assertTrue(isinstance(got, list)
+                                    and any(b.get("type") == "tool_result" for b in got))
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),

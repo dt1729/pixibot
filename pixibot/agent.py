@@ -164,20 +164,24 @@ class ReasoningAgent:
             assistant = self._assistant_content(resp)
             if assistant:  # never append an empty assistant turn (API rejects empty text blocks)
                 messages.append({"role": "assistant", "content": assistant})
+            # Run the tools whenever there are any — even if stop_reason isn't "tool_use"
+            # (e.g. max_tokens mid-tool-use) — so every tool_use gets a tool_result and
+            # we never persist a dangling tool_use (which the API rejects with a 400).
+            if resp.tool_calls:
+                results = []
+                for tc in resp.tool_calls:
+                    out = self._run_tool(tc, bb)
+                    first = out.splitlines()[0][:140] if out else ""
+                    _log.info("%s tool %s(%s) -> %s",
+                              self.agent_id, tc.name, self._tool_summary(tc.input), first)
+                    results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": out,
+                    })
+                messages.append({"role": "user", "content": results})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
                 return last_text
-            results = []
-            for tc in resp.tool_calls:
-                out = self._run_tool(tc, bb)
-                first = out.splitlines()[0][:140] if out else ""
-                _log.info("%s tool %s(%s) -> %s",
-                          self.agent_id, tc.name, self._tool_summary(tc.input), first)
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tc.id,
-                    "content": out,
-                })
-            messages.append({"role": "user", "content": results})
         return last_text
 
     def _report_completion(self, bb: Blackboard, before, summary: str) -> None:
@@ -232,9 +236,11 @@ class ReasoningAgent:
         if self.workspace is None:
             return
         for path in self.workspace.changed_since(before):
-            content = self.workspace.read_file(path)
             try:
-                bb.send(self.agent_id, content if content is not None else "",
-                        kind=KIND_ARTIFACT, section=path, enforce_scope=False)
+                content = self.workspace.read_file(path)
+                if content is None:  # binary / unreadable-as-text — don't log it as an artifact
+                    continue
+                bb.send(self.agent_id, content, kind=KIND_ARTIFACT,
+                        section=path, enforce_scope=False)
             except Exception:  # never let logging break the run
                 pass
