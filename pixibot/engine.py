@@ -8,9 +8,10 @@ splices in any new agents.
 
 from __future__ import annotations
 
+import os
 from typing import Callable, Optional
 
-from . import observer, orchestrator, tpm
+from . import gates, observer, orchestrator, tpm
 from .blackboard import KIND_DIRECTIVE, Blackboard
 from .context_manager import ContextManager
 from .logbook import get as _get_logger
@@ -19,6 +20,9 @@ from .model import Model
 _log = _get_logger("engine")
 
 ModelFactory = Callable[[dict], Model]
+
+# Greenfield-topology adoptions, each an on/off ablation arm (default: all on).
+ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
 
 
 def default_input(objective: str, *, hard: bool = False) -> dict:
@@ -48,6 +52,9 @@ class Engine:
         self.on_event = None       # per-agent activity feed on_event(agent_id, kind, detail)
         self.workspace = None      # real project dir; created per build
         self.workspace_base = None # parent dir for per-run workspaces (defaults to ~/pixibot-workspace)
+        self.features = set(ALL_FEATURES)  # toggleable adoption arms (see ALL_FEATURES)
+        self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
+        self.last_gate = None      # (passed, [CheckResult]) from the most recent gate
 
     def _ensure_workspace(self):
         if self.workspace is None:
@@ -81,14 +88,51 @@ class Engine:
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
         objective = self.projection.get("plan_summary") or inp.get("objective", "")
-        orchestrator.materialize(self.projection, self.bb, self.cm,
-                                 self.model_factory, self.workspace, self.on_event, objective)
+        orchestrator.materialize(
+            self.projection, self.bb, self.cm, self.model_factory, self.workspace,
+            self.on_event, objective,
+            continuous=("continuous_testing" in self.features))
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
-        _log.info("BUILD done run=%s steps=%d files=%d",
-                  run_id, steps, len(self.workspace.list_files()))
-        return {"projection": self.projection, "steps": steps,
-                "workspace": self.workspace.root, "run_id": run_id}
+
+        gate = None
+        if "auto_gate" in self.features:
+            steps, gate = self._gate_loop(run_id, steps)
+
+        _log.info("BUILD done run=%s steps=%d files=%d gate=%s",
+                  run_id, steps, len(self.workspace.list_files()),
+                  gate[0] if gate else "n/a")
+        res = {"projection": self.projection, "steps": steps,
+               "workspace": self.workspace.root, "run_id": run_id}
+        if gate is not None:
+            res["gate_passed"], res["gate"] = gate
+        return res
+
+    # -- adoption E: mechanical gate + bounded failure-driven re-planning --------
+    def _derive_checks(self):
+        """Checks derived from the workspace: run pytest when real .py tests exist."""
+        files = self.workspace.list_files()
+        if any(f.endswith(".py") and "test" in os.path.basename(f) for f in files):
+            return [("pytest", "python3 -m pytest -q")]
+        return []
+
+    def _gate_loop(self, run_id: str, steps: int):
+        """Run the mechanical gate; on failure, auto-revise (bounded) and re-gate.
+        Returns (steps, (passed, results)) or (steps, None) when there's nothing to check."""
+        checks = self._derive_checks()
+        if not checks:
+            return steps, None
+        for attempt in range(self.max_gate_revises + 1):
+            passed, results = gates.checkpoint_gate(checks, cwd=self.workspace.root)
+            self.last_gate = (passed, results)
+            _log.info("GATE run=%s attempt=%d passed=%s", run_id, attempt, passed)
+            if passed or attempt == self.max_gate_revises:
+                return steps, (passed, results)
+            failing = "\n\n".join(f"[{r.name}]\n{r.output[-1500:]}"
+                                  for r in results if not r.passed)
+            steps += self.revise("mechanical gate failed — fix these:\n" + failing)
+            checks = self._derive_checks() or checks
+        return steps, self.last_gate
 
     def build_objective(self, objective: str, *, hard: bool = False) -> dict:
         return self.build(default_input(objective, hard=hard))

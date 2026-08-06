@@ -20,8 +20,12 @@ class CheckResult:
     output: str
 
 
-def run_check(name: str, command: str, cwd: str = ".") -> CheckResult:
-    p = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True)
+def run_check(name: str, command: str, cwd: str = ".", timeout: int = 300) -> CheckResult:
+    try:
+        p = subprocess.run(command, shell=True, cwd=cwd, capture_output=True,
+                           text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return CheckResult(name, False, f"timed out after {timeout}s")
     return CheckResult(name, p.returncode == 0, p.stdout + p.stderr)
 
 

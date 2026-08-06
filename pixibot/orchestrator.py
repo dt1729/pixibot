@@ -22,6 +22,7 @@ ModelFactory = Callable[[dict], Model]
 ROLE_RANK = {
     "topology": 0, "architect": 0,
     "lld": 1, "design": 1,
+    "test-designer": 1.5,  # designs tests from the spec; runs after design, before/with programmers
     "programmer": 2, "coder": 2, "implementer": 2, "specialist": 2,
     "tester": 3, "qa": 3,
     "reviewer": 4,
@@ -60,12 +61,30 @@ def register_one(spec: dict, bb: Blackboard, cm: ContextManager,
 
 def materialize(projection: dict, bb: Blackboard, cm: ContextManager,
                 model_factory: ModelFactory, workspace=None, on_event=None,
-                objective="") -> ContextManager:
+                objective="", *, continuous: bool = True) -> ContextManager:
     deps = infer_deps(projection)
     objective = objective or projection.get("plan_summary", "")
+    agents = {}
     for spec in projection["agents"]:
-        register_one(spec, bb, cm, model_factory, workspace, on_event, objective)
+        agents[spec["id"]] = register_one(spec, bb, cm, model_factory,
+                                          workspace, on_event, objective)
         cm.set_deps(spec["id"], deps.get(spec["id"], set()))
+        # Adoption A — continuous testing: a reader re-activates whenever an
+        # artifact lands in a section it reads (the r=0.72 self-testing loop),
+        # not just once after its dependencies complete.
+        if continuous:
+            for pattern in spec.get("blackboard", {}).get("reads", ()):
+                cm.add_dependency(pattern, spec["id"])
+    # Adoption D — mechanical blindness: a test-designer must design tests from the
+    # spec, not the implementation. Deny it read access to the programmers' sections.
+    impl_sections = tuple(sorted({
+        w for s in projection["agents"] if s.get("role") == "programmer"
+        for w in s.get("blackboard", {}).get("writes", ())
+    }))
+    if impl_sections:
+        for spec in projection["agents"]:
+            if spec.get("role") == "test-designer":
+                agents[spec["id"]].read_denylist = impl_sections
     return cm
 
 

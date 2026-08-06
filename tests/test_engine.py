@@ -43,6 +43,27 @@ class EngineTest(unittest.TestCase):
         # the tester re-ran off the new artifact (handshake), not just the programmer
         self.assertIn("2 tests", self.bb.read_section("tests/f1").payload)
 
+    def test_derive_checks_requires_real_py_tests(self):
+        from pixibot.workspace import Workspace
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        self.engine.workspace = Workspace(d)
+        self.assertEqual(self.engine._derive_checks(), [])          # nothing to run
+        self.engine.workspace.write_file("tests/f1", "2 tests passing")  # not a .py file
+        self.assertEqual(self.engine._derive_checks(), [])          # still nothing
+        self.engine.workspace.write_file("tests/test_x.py", "def test_x():\n    assert True\n")
+        self.assertEqual(len(self.engine._derive_checks()), 1)      # now pytest runs
+
+    def test_gate_passes_on_green_suite(self):
+        from pixibot.workspace import Workspace
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        self.engine.workspace = Workspace(d)
+        self.engine.workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
+        steps, gate = self.engine._gate_loop("r", 0)
+        self.assertIsNotNone(gate)
+        self.assertTrue(gate[0])  # mechanical gate is green — no auto-revise triggered
+
     def test_revise_adds_agent(self):
         self.engine.build_objective("thing")
         self.assertIsNone(self.bb.read_section("docs/f1"))

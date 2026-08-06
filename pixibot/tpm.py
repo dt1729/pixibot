@@ -20,13 +20,20 @@ TPM_SYSTEM = (
     "Keys: plan_summary, breakdown, blackboard_schema, agents, checkpoints.\n"
     "Each agent: {id, role, depends_on (list of agent ids that must finish before it runs), "
     "budget:{compute, depth, scope}, blackboard:{reads, writes}, activates_on}.\n"
-    "  • role is one of: topology, lld, programmer, tester, reviewer.\n"
+    "  • role is one of: topology, lld, test-designer, programmer, tester, reviewer.\n"
     "  • depth is one of: junior | senior | principal.\n"
     "  • blackboard.writes are concrete workspace file paths (e.g. 'reverse.py', "
-    "'tests/test_reverse.py', 'ARCHITECTURE.md').\n\n"
+    "'tests/test_reverse.py', 'ARCHITECTURE.md').\n"
+    "  • blackboard.reads are also TRIGGERS: an agent re-activates whenever an artifact "
+    "lands in a section it reads. For the tester, list the implementation paths it must "
+    "react to (e.g. reads: ['impl/', 'src/']) so it re-runs when code changes.\n\n"
     "Design a real pipeline with depends_on: a topology/architect agent first, then "
     "programmer(s), then a tester that runs the code, optionally a reviewer. Keep the team "
-    "as small as the task needs."
+    "as small as the task needs.\n"
+    "Optional (AgentCoder split): for test-heavy work you may add a 'test-designer' that "
+    "writes the tests from the acceptance criteria + ARCHITECTURE.md interfaces (reading "
+    "neither the implementation nor depending on the programmer, so it runs concurrently), "
+    "leaving the 'tester' to execute them."
 )
 
 
@@ -60,7 +67,10 @@ def plan(inp: dict, model: Model, *, max_repairs: int = 3) -> dict:
 REVISE_SYSTEM = TPM_SYSTEM + (
     " You are revising an existing projection based on user feedback on a demo. "
     "Keep what works, change what the feedback asks for, and return the full "
-    "updated projection JSON (all agents, including unchanged ones)."
+    "updated projection JSON (all agents, including unchanged ones). "
+    "When the feedback is a mechanical failure (failing tests/checks), PREFER re-scoping "
+    "or removing agents over adding them — a leaner, more focused team usually fixes the "
+    "problem with fewer tokens than a bigger one."
 )
 
 

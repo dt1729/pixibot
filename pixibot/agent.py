@@ -50,6 +50,7 @@ class ReasoningAgent:
         self.reads = tuple(reads)
         self.workspace = workspace
         self.on_event = on_event  # on_event(agent_id, kind, detail) — live activity feed
+        self.read_denylist: tuple = ()  # sections this role may not read (adoption D)
         self.tool_defs = tool_defs if tool_defs is not None else DEFAULT_TOOL_DEFS
         self.tool_impls = tool_impls if tool_impls is not None else default_tool_impls()
         self.max_iters = max_iters
@@ -98,7 +99,7 @@ class ReasoningAgent:
 
     # -- the activation loop -------------------------------------------------
     # roles whose turn is worthless unless they leave a file behind
-    _PRODUCER_ROLES = ("topology", "lld", "programmer", "tester")
+    _PRODUCER_ROLES = ("topology", "lld", "test-designer", "programmer", "tester")
 
     _NUDGE = ("You are about to end your turn without creating any file in the workspace. "
               "Your role's deliverable IS a file. The workspace being empty is normal — YOU "

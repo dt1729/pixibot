@@ -67,6 +67,21 @@ SEND_MESSAGE = {
 DEFAULT_TOOL_DEFS = [WRITE_ARTIFACT, READ_FILE, LIST_FILES, RUN_BASH, SEND_MESSAGE]
 
 
+_BLIND_REFUSAL = ("refused: your role designs tests from the specification and the "
+                  "architecture's declared interfaces, not the implementation. You may not "
+                  "read implementation files — encode what the software SHOULD do.")
+
+
+def _denies(agent, target: str) -> bool:
+    """True if `target` (a path, or a shell command that references one) hits the
+    agent's read denylist (adoption D — mechanical test-designer blindness)."""
+    for pat in getattr(agent, "read_denylist", ()) or ():
+        p = pat.rstrip("/")
+        if target == pat or target == p or target.startswith(p + "/") or p in target:
+            return True
+    return False
+
+
 def default_tool_impls() -> dict:
     """Return name -> callable(agent, blackboard, input) -> result string."""
 
@@ -81,6 +96,8 @@ def default_tool_impls() -> dict:
         return f"wrote {inp['section']} ({len(inp['content'])} chars) to blackboard"
 
     def read_file(agent, bb, inp):
+        if _denies(agent, inp["path"]):
+            return _BLIND_REFUSAL
         ws = getattr(agent, "workspace", None)
         content = ws.read_file(inp["path"]) if ws is not None else None
         if content is None:  # fall back to a blackboard artifact at that section
@@ -97,6 +114,8 @@ def default_tool_impls() -> dict:
         ws = getattr(agent, "workspace", None)
         if ws is None:
             return "(no workspace available to run commands)"
+        if _denies(agent, inp["command"]):
+            return _BLIND_REFUSAL
         rc, out = ws.run(inp["command"])
         bb.send(agent.agent_id, f"$ {inp['command']}\n(exit {rc})\n{out}", kind=KIND_CONTROL)
         return f"(exit {rc})\n{out[:4000]}"
