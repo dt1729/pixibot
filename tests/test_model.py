@@ -2,7 +2,12 @@
 
 import unittest
 
-from pixibot.model import AnthropicModel, _cached_messages, _cached_system
+from pixibot.model import (
+    AnthropicModel,
+    _cached_messages,
+    _cached_system,
+    _sanitize_messages,
+)
 
 
 class CacheAssemblyTest(unittest.TestCase):
@@ -38,6 +43,30 @@ class CacheAssemblyTest(unittest.TestCase):
         self.assertEqual(kw["system"][0]["cache_control"]["ttl"], "1h")
         self.assertIn("cache_control", kw["messages"][-1]["content"][-1])
         self.assertEqual(kw["thinking"], {"type": "adaptive", "display": "summarized"})
+
+    def test_sanitize_strips_empty_text_blocks(self):
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [{"type": "text", "text": ""}]},   # empty -> dropped
+            {"role": "user", "content": [
+                {"type": "text", "text": "   "},                                # empty -> dropped
+                {"type": "tool_result", "tool_use_id": "t", "content": "ok"},   # kept
+            ]},
+        ]
+        out = _sanitize_messages(msgs)
+        self.assertEqual(len(out), 2)  # the empty assistant message is gone
+        self.assertEqual([b["type"] for b in out[-1]["content"]], ["tool_result"])
+
+    def test_kwargs_never_emits_empty_text_block(self):
+        m = AnthropicModel("claude-opus-4-8")
+        kw = m._kwargs("sys", [{"role": "user", "content": "go"},
+                               {"role": "assistant", "content": [{"type": "text", "text": ""}]}],
+                       tools=[])
+        for msg in kw["messages"]:
+            if isinstance(msg["content"], list):
+                for b in msg["content"]:
+                    if b.get("type") == "text":
+                        self.assertTrue(b["text"].strip(), "empty text block leaked into request")
 
     def test_kwargs_no_cache_when_disabled(self):
         m = AnthropicModel("claude-haiku-4-5", use_thinking=False, use_cache=False)

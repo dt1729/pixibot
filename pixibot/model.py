@@ -92,6 +92,27 @@ def _cached_system(system):
     return blocks
 
 
+def _sanitize_messages(messages):
+    """Drop empty text blocks (and messages left with no content). The API rejects
+    empty text content blocks, and a persisted stateful transcript can contain one
+    from a model turn that produced neither text nor a tool call."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            blocks = [b for b in content
+                      if not (isinstance(b, dict) and b.get("type") == "text"
+                              and not (b.get("text") or "").strip())]
+            if not blocks:
+                continue
+            out.append({**m, "content": blocks})
+        elif isinstance(content, str) and not content.strip():
+            continue
+        else:
+            out.append(m)
+    return out
+
+
 def _cached_messages(messages):
     """Rolling breakpoint on the last block of the most recent turn, so the next
     request reuses the whole prior-conversation prefix. Copies before marking —
@@ -127,6 +148,7 @@ class AnthropicModel(Model):
         self._client = None
 
     def _kwargs(self, system, messages, tools) -> dict:
+        messages = _sanitize_messages(messages)  # never send empty text blocks (400)
         if self.use_cache:
             system = _cached_system(system)
             messages = _cached_messages(messages)
@@ -146,8 +168,9 @@ class AnthropicModel(Model):
             return
         read = getattr(usage, "cache_read_input_tokens", 0) or 0
         write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        _mlog.info("cache read=%s write=%s uncached=%s",
-                   read, write, getattr(usage, "input_tokens", 0))
+        _mlog.info("usage cache_read=%s cache_write=%s uncached_in=%s out=%s",
+                   read, write, getattr(usage, "input_tokens", 0),
+                   getattr(usage, "output_tokens", 0))
 
     def _client_lazy(self):
         if self._client is None:

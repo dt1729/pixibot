@@ -86,7 +86,7 @@ class ReasoningAgent:
             content.append({"type": "text", "text": resp.text})
         for tc in resp.tool_calls:
             content.append({"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input})
-        return content or [{"type": "text", "text": ""}]
+        return content  # may be empty (no text, no tools) — caller skips appending it
 
     def _run_tool(self, tc, bb: Blackboard) -> str:
         impl = self.tool_impls.get(tc.name)
@@ -161,7 +161,9 @@ class ReasoningAgent:
                 self._emit("say", last_text)
             for tc in resp.tool_calls:
                 self._emit("tool", f"{tc.name}({self._tool_summary(tc.input)})")
-            messages.append({"role": "assistant", "content": self._assistant_content(resp)})
+            assistant = self._assistant_content(resp)
+            if assistant:  # never append an empty assistant turn (API rejects empty text blocks)
+                messages.append({"role": "assistant", "content": assistant})
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
                 return last_text
             results = []

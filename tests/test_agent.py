@@ -1,5 +1,6 @@
 """Tests for the ReasoningAgent tool loop (MockModel — no API needed)."""
 
+import json
 import os
 import shutil
 import tempfile
@@ -164,6 +165,21 @@ class AgentTest(unittest.TestCase):
         agent.runner(self.bb, "arch", self.bb.poll_inbox("arch"))
         self.assertIn("Build a PyQt video viewer", seen["first"])  # not amnesiac
         self.assertGreater(seen["len"], first_len)                 # resumed prior transcript
+
+    def test_empty_model_turn_produces_no_empty_block(self):
+        """A turn with no text and no tool call must not persist an empty text block
+        (the API rejects empty text blocks — the crash that BLOCKED live agents)."""
+        model = MockModel([ModelResponse(text="", stop_reason="end_turn")])
+        agent = ReasoningAgent("a", model, role="reviewer")
+        self.bb.register_agent("a")
+        self.bb.send("user", "x", to="a")
+        agent.runner(self.bb, "a", self.bb.poll_inbox("a"))  # must not raise
+        mem = json.loads(self.bb.load_memory("a"))
+        for m in mem:
+            if isinstance(m.get("content"), list):
+                for b in m["content"]:
+                    self.assertFalse(b.get("type") == "text" and not b.get("text"),
+                                     "empty text block persisted into transcript")
 
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
