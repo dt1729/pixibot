@@ -51,7 +51,11 @@ ROLE_BRIEFS = {
         "read implementation files are refused by the harness. Write real test files with "
         "write_artifact (e.g. section='tests/test_<feature>.py') covering the public interface, "
         "integration points, and error paths. Do NOT write production code. Your turn is not "
-        "done until the test files exist — a separate tester runs them against the implementation."
+        "done until the test files exist — a separate tester runs them against the implementation.\n"
+        "STAY IN YOUR LANE: do NOT exhaustively validate your expectations by running real tools "
+        "(ffmpeg, Qt, subprocess probes) — a couple of orienting checks at most, then WRITE THE "
+        "TESTS. Deep empirical R&D burns your token budget (and can blow the output limit); "
+        "executing tests against the real implementation is the tester's job, not yours."
     ),
     "programmer": (
         "ROLE: Programmer / implementer.\n"

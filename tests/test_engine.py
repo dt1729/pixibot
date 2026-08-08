@@ -43,6 +43,11 @@ class EngineTest(unittest.TestCase):
         # the tester re-ran off the new artifact (handshake), not just the programmer
         self.assertIn("2 tests", self.bb.read_section("tests/f1").payload)
 
+    def test_auto_gate_off_by_default(self):
+        # auto-replan is opt-in (cost); continuous testing is on
+        self.assertNotIn("auto_gate", self.engine.features)
+        self.assertIn("continuous_testing", self.engine.features)
+
     def test_derive_checks_requires_real_py_tests(self):
         from pixibot.workspace import Workspace
         d = tempfile.mkdtemp()

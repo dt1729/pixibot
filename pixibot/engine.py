@@ -21,8 +21,11 @@ _log = _get_logger("engine")
 
 ModelFactory = Callable[[dict], Model]
 
-# Greenfield-topology adoptions, each an on/off ablation arm (default: all on).
+# Greenfield-topology adoptions, each an on/off ablation arm.
 ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
+# auto_gate (adoption E's auto-replan) is OFF by default: a failing suite triggers extra
+# Opus re-plan rounds, so it's opt-in on cost grounds. Add it to engine.features to enable.
+DEFAULT_FEATURES = frozenset({"continuous_testing"})
 
 
 def default_input(objective: str, *, hard: bool = False) -> dict:
@@ -52,7 +55,7 @@ class Engine:
         self.on_event = None       # per-agent activity feed on_event(agent_id, kind, detail)
         self.workspace = None      # real project dir; created per build
         self.workspace_base = None # parent dir for per-run workspaces (defaults to ~/pixibot-workspace)
-        self.features = set(ALL_FEATURES)  # toggleable adoption arms (see ALL_FEATURES)
+        self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
         self.last_gate = None      # (passed, [CheckResult]) from the most recent gate
 

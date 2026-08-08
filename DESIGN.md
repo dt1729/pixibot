@@ -484,6 +484,13 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 39. **Real files + reliable coordination (M15):** agents write actual files to a per-run **Workspace** (path-safe read/write/list + `run_bash`) via filesystem tools, and read each other's files; **deterministic dependency-chain activation** (explicit `depends_on`, else role order) makes every agent participate (fixing the "only the root ran" failure); per-agent prompts are much more verbose (role charter + workflow + handoff). **Verified live:** a real multi-agent Claude run produced a working `reverse()` module + a pytest suite, with the tester actually executing pytest. Output lands in `~/pixibot-workspace/<run>/`.
 40. **Friendly shell CLI (M16):** the CLI is a shell — `readline` **up/down command history** (persisted to `~/.pixibot_history`) + line editing; **bash-style navigation** of the workspace (`ls`/`cd`/`pwd`/`cat`/`tree`, cwd-aware & path-safe); **bare-word actions** (no slash): `build`, `build-from <file.md>`, `revise`, `tell`, `ask`, `status`, `agents`, `report`, `provider`, `hard`, `help`, `clear`, `exit`; plain text talks to a **project-wide overseer** (read-only spokesbot over all agents/files/status). `build-from` parses the markdown intake form.
 41. **Build isolation + visibility (M17):** the Engine **clears the workspace at each build start** — stale files from a prior run had poisoned a new task (a video-viewer request built a URL shortener because leftover mock files anchored the architect). Agents now log **every created/changed file** as an artifact after their turn, so files written via `run_bash` (not just `write_artifact`) show up in `status`/`report`/Observer. **Live per-agent progress** (start → finish → files) replaces the blind spinner; a planning line precedes the TPM call.
+42. **Non-blocking TUI (M18):** a `textual` 3-pane split — shell (left), live build status (top-right), the active agent's thinking/tool stream (bottom-right) — runs the build in a background worker while the shell stays usable. The blackboard is made thread-safe (`check_same_thread=False` + `RLock`) for the worker↔UI split; `--plain` forces the classic shell.
+43. **Confinement + delivery guarantee (M19):** `run_bash` is sandboxed to the workspace — cwd/HOME/TMPDIR pinned there, secret-bearing env vars stripped, and commands that escape the tree (parent traversal, absolute `/home`//`etc`, key files) refused — after agents were caught reading the sibling workspace and `ant_key.txt`. A **deliver-or-nudge** guard forces a producing role that wrote nothing to produce its file on every exit path; `max_iters` raised 8→14.
+44. **Transparency + self-correction (M20–M22):** agent **thinking** is captured and surfaced (live pane + `think <agent>`, persisted to the blackboard); each agent posts a **completion report** on finishing; the overseer snapshot carries real content (reports + latest messages) and a raw `updates` command bypasses the LLM; the team becomes a **feedback loop** — messaging a finished agent re-activates it, so a tester/reviewer routes bugs to the programmer and design flaws to the architect (who reconsiders/revises), bounded by `max_steps` (`poll_inbox` no longer self-wakes the sender).
+45. **Run isolation, observability, statefulness (M23–M25):** each build gets a fresh `run_id` (`reset_run` wipes stale agents/cursors/memory) and its own workspace dir, so an accidental rebuild can't wipe prior work; a file **run log** (`~/.pixibot/pixibot.log`) records activations, model turns, tool calls, and crashes, and the context-manager wraps each runner in try/except (a crashing agent → BLOCKED + traceback, not a hung build); **agents became stateful** — each persists its conversation transcript and resumes it, and the run objective is injected into every activation (fixing an amnesiac architect that hallucinated a new project after a status ping).
+46. **Prompt caching (M26):** `AnthropicModel` adds two 1-hour cache breakpoints — one on system+tools, a rolling one on the latest turn — so the growing stateful transcript is re-read at ~0.1× input cost; markers are applied to a copy (never persisted, so they can't exceed the 4-breakpoint cap); thinking `display` set to `summarized` so it actually renders.
+47. **Greenfield topologies (M27):** the research adoptions land as **toggleable ablation arms** (`Engine.features`): (A) continuous testing — a reader re-activates on every write to a section it reads; (B) a spec-blind **test-designer** role (AgentCoder split); (C) a bounded review dyad with confidence-gated routing (ChatDev/UA-ChatDev); (D) mechanical test-designer **blindness** (a `read_denylist` refuses implementation paths); (E) failure-driven **auto-replan** — the checkpoint gate runs `pytest` after a build and, on failure, re-invokes the TPM (bounded).
+48. **Message-shape hardening + cost defaults (M28–M30):** three real crashes from the stateful-transcript ↔ live-API seam were fixed — empty text blocks, dangling `tool_use` (tools now always run before a stop such as `max_tokens`), and binary files read as UTF-8 — with a defensive sanitizer in `AnthropicModel`. `auto_gate` is now **off by default** (its re-plan loop is the biggest cost multiplier); the test-designer charter forbids exhaustive empirical R&D that blows the output budget.
 
 ---
 
@@ -505,23 +512,24 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 
 ## 16. Status & next steps
 
-**Implemented (M1–M10), all unit-tested (42 tests green), on `main`:** blackboard
-(§13), context-manager (§9), input/projection schemas + repair loop (§6/§7),
-agent runtime with a `Model` abstraction (§9), agent factory, TPM (§7),
-orchestrator (§5), full offline pipeline (`pixibot/run.py`), Docker executor +
-local fallback (§11), Observer (§11), mechanical checkpoint gate (§10), and the
-chatbot CLI + spokesbot broker (§12, M11).
+**Implemented (M1–M30), 120 unit tests green, on `main`:** everything in §0–§14 plus
+decision-log entries 35–48 above — real multi-agent Claude runs writing tested code to
+per-run workspaces; the friendly shell + non-blocking split-pane TUI; multi-provider
+models (native Anthropic + OpenAI-compatible) with 1-hour prompt caching; stateful,
+confined agents with a self-correction loop; run isolation, a file run log, and
+crash-safe scheduling; and the greenfield-topology adoptions (A–E) as toggleable
+ablation arms (`Engine.features`).
 
-**Coded but not yet exercised:** the real-Claude path (`AnthropicModel`,
-`anthropic_*` factories) — needs the `anthropic` SDK installed and
-`ANTHROPIC_API_KEY`. Everything else runs offline against `MockModel`.
+**Verified live:** real Anthropic builds produce structured, tested projects (e.g. a
+PyQt/ffmpeg video viewer with a passing suite). The stateful-transcript ↔ live-API seam
+surfaced several message-shape edge cases (empty blocks, dangling `tool_use`, binary
+files) — all fixed and regression-tested.
 
-**Next wiring:**
-- Human **checkpoint → demo → feedback → revision** loop into `run_pipeline`
-  (the gate exists standalone; the pause/revise cycle isn't wired yet).
-- **Multi-agent projections** with dependencies/handshakes beyond the
-  single-agent demo (topology → LLD → programmer → tester).
-- Build & use the **Docker image** for real tool execution.
-- Deepen `standards/` and invoke the gate at each checkpoint.
-- A **first reference project** for a real end-to-end run (§15).
+**Next:**
+- A **benchmark harness** over the toggleable arms (ProgramBench-derived prompts).
+- **C/C++ gate support** (g++ / CMake + ctest) — the mechanical gate is Python/`pytest`
+  only today; Pixibot targets Python and C/C++.
+- Real **Docker/sandbox** execution for `run_bash` (confinement is a cwd/env guard, not
+  yet a container).
+- Wire the **human checkpoint → demo → feedback** pause into the interactive loop.
 ```
