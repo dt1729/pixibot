@@ -1,15 +1,22 @@
-"""Split-pane TUI for Pixibot (M18) — a tmux-like layout in one window.
+"""Split-pane TUI for Pixibot (M31 revamp).
 
+Keyboard-first, mouse-aware, tmux-like:
   ┌── shell (left) ──────┬── build status (top-right) ──┐
-  │ command input + log  │  agents + states             │
+  │ command log + input  │  agents + states             │
   │                      ├── active agent (bottom-right)┤
-  │                      │  each agent's actions/messages│
   └──────────────────────┴──────────────────────────────┘
 
-Builds run in a background worker so the shell stays usable. Local commands
-(ls/cd/cat/status/…) are handled inline by a ChatSession; model-touching commands
-(build/revise/tell/ask/chat) run in worker threads and stream into the panes.
-Requires ``textual`` (pip install textual).
+  • click a pane (or Ctrl+1/2/3) to focus it — focused pane is highlighted
+  • Ctrl+Z zooms the focused pane to fullscreen (toggle) to see more text
+  • Ctrl+←/→ resize the left|right split; Ctrl+↑/↓ resize status|agent (when a
+    right pane is focused)
+  • command input: ←/→/Home/End editing, ↑/↓ history, Tab completion
+    (commands · workspace paths · agent ids), Ctrl-a/e/u/k/w emacs keys
+  • text selection with the mouse; Ctrl+C copies the selection (Textual native,
+    OSC-52 — works over SSH); Ctrl+Q quits (Ctrl+C no longer kills the app)
+
+Builds run in a background worker so the shell stays usable. Requires a recent
+``textual`` (pip install -U textual).
 """
 
 from __future__ import annotations
@@ -18,28 +25,139 @@ import os
 
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
-from textual.widgets import Input, RichLog, Static
+from textual.reactive import reactive
+from textual.widgets import Footer, Input, RichLog, Static
 
 from . import intake
-from .cli import ChatSession
+from .cli import COMMANDS, ChatSession
 from .engine import default_input
 
-_FAST = {"ls", "cd", "pwd", "cat", "tree", "status", "agents", "report",
-         "form", "hard", "provider", "help", "?", "think", "updates"}
+_LOCAL = {"ls", "cd", "pwd", "cat", "tree", "status", "agents", "report",
+          "form", "hard", "provider", "help", "?", "think", "updates"}
+_HISTFILE = os.path.expanduser("~/.pixibot_history")
+
+
+def _common_prefix(strings: list[str]) -> str:
+    if not strings:
+        return ""
+    s1, s2 = min(strings), max(strings)
+    for i, c in enumerate(s1):
+        if c != s2[i]:
+            return s1[:i]
+    return s1
+
+
+class Pane(Vertical):
+    """A focusable, zoomable region (click or Ctrl+1/2/3 to focus)."""
+    can_focus = True
+
+
+class CommandInput(Input):
+    """Shell input: ↑/↓ history, Tab completion, emacs line-editing keys."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.history: list[str] = []
+        self._hidx = 0            # index into history (== len means "new line")
+        self.completer = None     # set by the app: fn(text) -> (new_text, candidates)
+        self.on_complete_info = None  # fn(list[str]) -> None, to show candidates
+
+    def load_history(self) -> None:
+        try:
+            with open(_HISTFILE, encoding="utf-8") as f:
+                self.history = [ln.rstrip("\n") for ln in f if ln.strip()][-1000:]
+        except OSError:
+            self.history = []
+        self._hidx = len(self.history)
+
+    def remember(self, line: str) -> None:
+        if line and (not self.history or self.history[-1] != line):
+            self.history.append(line)
+            try:
+                with open(_HISTFILE, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
+                pass
+        self._hidx = len(self.history)
+
+    def _recall(self, delta: int) -> None:
+        if not self.history:
+            return
+        self._hidx = max(0, min(len(self.history), self._hidx + delta))
+        self.value = "" if self._hidx == len(self.history) else self.history[self._hidx]
+        self.cursor_position = len(self.value)
+
+    async def _on_key(self, event) -> None:  # noqa: C901 - a small key router
+        k = event.key
+        if k == "up":
+            event.stop(); event.prevent_default(); self._recall(-1); return
+        if k == "down":
+            event.stop(); event.prevent_default(); self._recall(1); return
+        if k == "tab":
+            event.stop(); event.prevent_default(); self._do_complete(); return
+        if k == "ctrl+a":
+            event.stop(); event.prevent_default(); self.cursor_position = 0; return
+        if k == "ctrl+e":
+            event.stop(); event.prevent_default(); self.cursor_position = len(self.value); return
+        if k == "ctrl+u":
+            event.stop(); event.prevent_default()
+            self.value = self.value[self.cursor_position:]; self.cursor_position = 0; return
+        if k == "ctrl+k":
+            event.stop(); event.prevent_default(); self.value = self.value[:self.cursor_position]; return
+        if k == "ctrl+w":
+            event.stop(); event.prevent_default()
+            left, right = self.value[:self.cursor_position], self.value[self.cursor_position:]
+            stripped = left.rstrip()
+            cut = stripped.rfind(" ") + 1
+            self.value = stripped[:cut] + right
+            self.cursor_position = cut
+            return
+        await super()._on_key(event)
+
+    def _do_complete(self) -> None:
+        if not self.completer:
+            return
+        new_text, candidates = self.completer(self.value)
+        if new_text != self.value:
+            self.value = new_text
+            self.cursor_position = len(new_text)
+        if len(candidates) > 1 and self.on_complete_info:
+            self.on_complete_info(candidates)
 
 
 class PixibotApp(App):
     CSS = """
     Screen { layout: horizontal; }
-    #left  { width: 1fr; }
-    #right { width: 1fr; }
-    #shelllog { height: 1fr; border: round $accent; padding: 0 1; }
-    #cmd { dock: bottom; border: round $accent; }
-    #status { height: 45%; border: round green; padding: 0 1; }
-    #agentlog { height: 1fr; border: round yellow; padding: 0 1; }
+    #p_shell { width: 1fr; }
+    #p_right { width: 1fr; }
+    .pane { border: round $panel; padding: 0 1; }
+    .pane:focus, .pane:focus-within { border: round $accent; }
+    #shelllog { height: 1fr; }
+    #cmd { dock: bottom; border: round $panel-darken-1; }
+    #p_status { height: 45%; }
+    #p_agent { height: 1fr; }
+    .hidden { display: none; }
+    .zoom-w { width: 100% !important; }
+    .zoom-h { height: 1fr !important; }
     """
-    BINDINGS = [("ctrl+c", "quit", "Quit"), ("ctrl+d", "quit", "Quit")]
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+z", "zoom", "Zoom pane"),
+        Binding("ctrl+1", "focus_pane('cmd')", "Shell"),
+        Binding("ctrl+2", "focus_pane('p_status')", "Status"),
+        Binding("ctrl+3", "focus_pane('agentlog')", "Agent"),
+        Binding("ctrl+left", "resize('w', -6)", "Narrower", show=False),
+        Binding("ctrl+right", "resize('w', 6)", "Wider", show=False),
+        Binding("ctrl+up", "resize('h', -6)", "Shorter", show=False),
+        Binding("ctrl+down", "resize('h', 6)", "Taller", show=False),
+        Binding("ctrl+y", "copy_pane", "Copy pane"),
+    ]
+
+    left_pct = reactive(50)
+    status_pct = reactive(45)
 
     def __init__(self, session: ChatSession, label: str, log_path: str = ""):
         super().__init__()
@@ -49,24 +167,47 @@ class PixibotApp(App):
         self.build_title = "(no build yet)"
         self.agent_order: list[str] = []
         self.agent_states: dict[str, str] = {}
+        self._zoomed: str | None = None
 
+    # ── layout ────────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
-        with Vertical(id="left"):
+        with Pane(id="p_shell", classes="pane"):
             yield RichLog(id="shelllog", wrap=True, markup=True, highlight=False)
-            yield Input(placeholder="build <objective> · ls · cat <file> · ask <agent> <q> · help",
-                        id="cmd")
-        with Vertical(id="right"):
-            yield Static(self._status_text(), id="status")
-            yield RichLog(id="agentlog", wrap=True, markup=False)
+            yield CommandInput(
+                placeholder="build <objective> · ls · cat <file> · ask <agent> <q> · Tab · ↑↓ · help",
+                id="cmd")
+        with Vertical(id="p_right"):
+            with Pane(id="p_status", classes="pane"):
+                yield Static(self._status_text(), id="status")
+            with Pane(id="p_agent", classes="pane"):
+                yield RichLog(id="agentlog", wrap=True, markup=False)
+        yield Footer()
 
     def on_mount(self) -> None:
+        cmd = self.query_one("#cmd", CommandInput)
+        cmd.load_history()
+        cmd.completer = self._complete
+        cmd.on_complete_info = lambda cands: self._shell("  " + "  ".join(cands))
         self._shell(f"[b magenta]Pixibot[/]  ·  provider: {self.label}")
-        self._shell("Builds run in the background — watch the right panes. 'help' for commands.")
+        self._shell("Ctrl+1/2/3 focus · Ctrl+Z zoom · Ctrl+←→↑↓ resize · Ctrl+C copy · Ctrl+Q quit")
         if self.log_path:
             self._shell(f"[dim]run log: {self.log_path}[/]")
-        self.query_one("#cmd", Input).focus()
+        cmd.focus()
 
-    # ── pane helpers (main thread only) ─────────────────────────────────────
+    def watch_left_pct(self, v: int) -> None:
+        try:
+            self.query_one("#p_shell").styles.width = f"{v}%"
+            self.query_one("#p_right").styles.width = f"{100 - v}%"
+        except Exception:
+            pass
+
+    def watch_status_pct(self, v: int) -> None:
+        try:
+            self.query_one("#p_status").styles.height = f"{v}%"
+        except Exception:
+            pass
+
+    # ── pane helpers ────────────────────────────────────────────────────────
     def _shell(self, text: str) -> None:
         self.query_one("#shelllog", RichLog).write(text)
 
@@ -77,7 +218,7 @@ class PixibotApp(App):
         lines = [f"[b]build:[/] {self.build_title}"]
         for a in self.agent_order:
             st = self.agent_states.get(a, "?")
-            colour = {"working…": "yellow", "DONE": "green"}.get(st, "white")
+            colour = {"working…": "yellow", "DONE": "green", "BLOCKED": "red"}.get(st, "white")
             lines.append(f"  {a:16} [{colour}]{st}[/]")
         if not self.agent_order:
             lines.append("  (no agents yet)")
@@ -86,6 +227,105 @@ class PixibotApp(App):
     def _refresh_status(self) -> None:
         self.query_one("#status", Static).update(self._status_text())
 
+    def _active_pane(self):
+        """The p_shell / p_status / p_agent region containing the focused widget."""
+        node = self.focused
+        while node is not None:
+            if getattr(node, "id", None) in ("p_shell", "p_status", "p_agent"):
+                return node
+            node = node.parent
+        return self.query_one("#p_shell")
+
+    # ── actions ───────────────────────────────────────────────────────────────
+    def action_focus_pane(self, widget_id: str) -> None:
+        try:
+            self.query_one(f"#{widget_id}").focus()
+        except Exception:
+            pass
+
+    def action_resize(self, axis: str, delta: int) -> None:
+        if axis == "w":
+            self.left_pct = max(20, min(80, self.left_pct + delta))
+        else:
+            self.status_pct = max(15, min(85, self.status_pct + delta))
+
+    def action_zoom(self) -> None:
+        pane = self._active_pane()
+        pid = pane.id
+        others = {"p_shell", "p_status", "p_agent"} - {pid}
+        if self._zoomed == pid:  # restore
+            for wid in ("p_shell", "p_right", "p_status", "p_agent"):
+                w = self.query_one(f"#{wid}")
+                w.remove_class("hidden")
+            self._zoomed = None
+        else:
+            # hide everything, then reveal the chain down to the zoomed pane
+            for wid in ("p_shell", "p_right", "p_status", "p_agent"):
+                self.query_one(f"#{wid}").remove_class("hidden")
+            if pid == "p_shell":
+                self.query_one("#p_right").add_class("hidden")
+            else:  # a right-column pane
+                self.query_one("#p_shell").add_class("hidden")
+                for wid in others & {"p_status", "p_agent"}:
+                    self.query_one(f"#{wid}").add_class("hidden")
+            self._zoomed = pid
+        pane.focus()
+
+    def action_copy_pane(self) -> None:
+        """Explicit 'copy this pane' (belt-and-suspenders alongside native selection)."""
+        pane = self._active_pane()
+        text = ""
+        try:
+            log = pane.query_one(RichLog)
+            text = "\n".join(str(getattr(ln, "text", ln)) for ln in log.lines)
+        except Exception:
+            try:
+                text = str(pane.query_one(Static).renderable)
+            except Exception:
+                text = ""
+        if text and hasattr(self, "copy_to_clipboard"):
+            self.copy_to_clipboard(text)
+            self._shell(f"[dim]copied {pane.id} ({len(text)} chars) to clipboard[/]")
+
+    # ── completion ─────────────────────────────────────────────────────────────
+    def _complete(self, text: str):
+        """Return (completed_text, candidates). Completes commands, then — by the
+        first word — workspace paths (cd/cat/ls/tree) or agent ids (ask/tell/think)."""
+        parts = text.split(" ")
+        if len(parts) <= 1:                       # completing the command word
+            cands = sorted(c for c in (COMMANDS | _LOCAL) if c.startswith(text))
+            prefix = ""
+        else:                                     # completing the last argument
+            cmd, frag = parts[0].lower(), parts[-1]
+            prefix = text[: len(text) - len(frag)]
+            if cmd in ("cd", "cat", "ls", "tree"):
+                cands = self._path_candidates(frag)
+            elif cmd in ("ask", "tell", "think"):
+                cands = sorted(a["agent_id"] for a in self.session.bb.list_agents()
+                               if a["agent_id"].startswith(frag))
+            else:
+                cands = []
+        if not cands:
+            return text, []
+        completed = (cands[0] + " ") if len(cands) == 1 else _common_prefix(cands)
+        return prefix + completed, cands
+
+    def _path_candidates(self, frag: str) -> list[str]:
+        ws = self.session.workspace
+        if ws is None:
+            return []
+        base = self.session.cwd
+        directory = os.path.dirname(frag)
+        look = os.path.join(base, directory) if directory else base
+        try:
+            entries = ws.listdir(look) or []
+        except Exception:
+            entries = []
+        leaf = os.path.basename(frag)
+        return sorted((os.path.join(directory, e) if directory else e)
+                      for e in entries if e.startswith(leaf))
+
+    # ── live build hooks (called from the worker via call_from_thread) ─────────
     def _set_build_title(self, objective: str) -> None:
         self.build_title = objective
         self.agent_order, self.agent_states = [], {}
@@ -112,12 +352,13 @@ class PixibotApp(App):
         else:
             self._agent(f"  {aid}: {detail[:400]}")
 
-    # ── input ───────────────────────────────────────────────────────────────
+    # ── input dispatch ─────────────────────────────────────────────────────────
     def on_input_submitted(self, event: Input.Submitted) -> None:
         line = event.value.strip()
         event.input.value = ""
         if not line:
             return
+        self.query_one("#cmd", CommandInput).remember(line)
         self._shell(f"[b]pixibot:/{self.session.cwd} ›[/] {line}")
         first = line.split(maxsplit=1)[0].lower()
         if first in ("exit", "quit"):
@@ -126,20 +367,19 @@ class PixibotApp(App):
         if first == "clear":
             self.query_one("#shelllog", RichLog).clear()
             return
-        if first in _FAST:
+        if first in _LOCAL:
             out = self.session.handle(line)
             if out:
                 self._shell(out)
             return
-        self._run_async(line)   # build / revise / tell / ask / chat -> worker
+        self._run_async(line)  # build / revise / tell / ask / chat -> worker
 
-    # ── background work ─────────────────────────────────────────────────────
     @work(thread=True)
     def _run_async(self, line: str) -> None:
         first = line.split(maxsplit=1)[0].lower()
         if first in ("build", "build-from", "buildfrom"):
             self._do_build(line)
-        else:  # revise / tell / ask / plain chat — engine hooks persist from the build
+        else:
             try:
                 out = self.session.handle(line)
             except Exception as exc:  # noqa: BLE001
@@ -182,10 +422,10 @@ class PixibotApp(App):
         self.call_from_thread(self._shell, f"[dim]building: {objective} …[/]")
         try:
             res = s.engine.build(inp)
-            s.workspace = s.engine.workspace   # adopt this build's isolated workspace
-            self.call_from_thread(self._shell,
-                                  f"[green]✓[/] built in {res['steps']} step(s) "
-                                  f"→ {res['run_id']}. try: ls · updates · report")
+            s.workspace = s.engine.workspace
+            self.call_from_thread(
+                self._shell,
+                f"[green]✓[/] built in {res['steps']} step(s) → {res['run_id']}. try: ls · updates · report")
         except Exception as exc:  # noqa: BLE001
             self.call_from_thread(self._shell, f"[red]build failed:[/] {exc}")
 
