@@ -153,6 +153,7 @@ class PixibotApp(App):
         Binding("ctrl+right", "resize('w', 6)", "Wider", show=False),
         Binding("ctrl+up", "resize('h', -6)", "Shorter", show=False),
         Binding("ctrl+down", "resize('h', 6)", "Taller", show=False),
+        Binding("ctrl+c", "copy", "Copy", priority=True),
         Binding("ctrl+y", "copy_pane", "Copy pane"),
     ]
 
@@ -189,7 +190,8 @@ class PixibotApp(App):
         cmd.completer = self._complete
         cmd.on_complete_info = lambda cands: self._shell("  " + "  ".join(cands))
         self._shell(f"[b magenta]Pixibot[/]  ·  provider: {self.label}")
-        self._shell("Ctrl+1/2/3 focus · Ctrl+Z zoom · Ctrl+←→↑↓ resize · Ctrl+C copy · Ctrl+Q quit")
+        self._shell("Ctrl+1/2/3 focus · Ctrl+Z zoom · Ctrl+←→↑↓ resize · "
+                    "Ctrl+C copy selection-or-pane · Ctrl+Y copy pane · Ctrl+Q quit")
         if self.log_path:
             self._shell(f"[dim]run log: {self.log_path}[/]")
         cmd.focus()
@@ -271,21 +273,66 @@ class PixibotApp(App):
             self._zoomed = pid
         pane.focus()
 
-    def action_copy_pane(self) -> None:
-        """Explicit 'copy this pane' (belt-and-suspenders alongside native selection)."""
-        pane = self._active_pane()
-        text = ""
+    @staticmethod
+    def _pane_text(pane) -> str:
         try:
             log = pane.query_one(RichLog)
-            text = "\n".join(str(getattr(ln, "text", ln)) for ln in log.lines)
+            return "\n".join(str(getattr(ln, "text", ln)) for ln in log.lines)
         except Exception:
             try:
-                text = str(pane.query_one(Static).renderable)
+                return str(pane.query_one(Static).renderable)
             except Exception:
-                text = ""
-        if text and hasattr(self, "copy_to_clipboard"):
+                return ""
+
+    def _to_clipboard(self, text: str) -> str:
+        """Copy to the *Windows* clipboard via clip.exe (reliable in WSL, no OSC-52
+        needed); fall back to OSC-52, then to a file."""
+        import shutil
+        import subprocess
+        clip = shutil.which("clip.exe")
+        if clip:
+            try:
+                subprocess.run([clip], input=text.encode("utf-8"), check=True, timeout=5)
+                return "windows clipboard (clip.exe)"
+            except Exception:
+                pass
+        try:
             self.copy_to_clipboard(text)
-            self._shell(f"[dim]copied {pane.id} ({len(text)} chars) to clipboard[/]")
+            return "OSC-52 (terminal clipboard)"
+        except Exception:
+            pass
+        try:
+            p = os.path.expanduser("~/pixibot-clip.txt")
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(text)
+            return f"file {p}"
+        except Exception:
+            return "FAILED"
+
+    def action_copy(self) -> None:
+        """Ctrl+C: copy the current text selection; if there's none, copy the whole
+        focused pane. Always targets the Windows clipboard in WSL."""
+        text = ""
+        try:
+            text = self.screen.get_selected_text() or ""
+        except Exception:
+            text = ""
+        source = "selection"
+        if not text.strip():
+            text = self._pane_text(self._active_pane())
+            source = self._active_pane().id
+        if not text.strip():
+            self._shell("[dim]nothing to copy[/]")
+            return
+        how = self._to_clipboard(text)
+        self._shell(f"[dim]copied {source} ({len(text)} chars) → {how}[/]")
+
+    def action_copy_pane(self) -> None:
+        """Ctrl+Y: copy the whole focused pane (ignores any selection)."""
+        text = self._pane_text(self._active_pane())
+        if text.strip():
+            how = self._to_clipboard(text)
+            self._shell(f"[dim]copied {self._active_pane().id} ({len(text)} chars) → {how}[/]")
 
     # ── completion ─────────────────────────────────────────────────────────────
     def _complete(self, text: str):
