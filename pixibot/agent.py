@@ -107,6 +107,14 @@ class ReasoningAgent:
               "write_artifact(section=<path>, content=<full file contents>). Do not just "
               "describe it.")
 
+    _MAX_TRUNCATIONS = 2
+    _TRUNCATED = (
+        "Your previous response was CUT OFF at the output token limit — so any file you "
+        "were writing was never saved. Do not repeat that attempt verbatim. Write ONE "
+        "file at a time with write_artifact, keep each file focused (split large modules "
+        "into smaller ones), and think briefly. Start with the single most important file "
+        "now.")
+
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
         before = self.workspace.snapshot() if self.workspace is not None else None
         # Stateful: resume this agent's own transcript so it remembers what it did
@@ -125,6 +133,7 @@ class ReasoningAgent:
         # early OR ran out of iterations exploring — force one dedicated delivery pass.
         if self._needs_nudge(bb, before):
             messages.append({"role": "user", "content": self._NUDGE})
+            _log.warning("%s: NUDGE — no file produced, forcing a delivery pass", self.agent_id)
             self._emit("say", "(nudged: no file produced — forcing deliverable)")
             last_text = self._tool_loop(bb, messages, max(4, self.max_iters // 2)) or last_text
         self._persist_memory(bb, messages)
@@ -142,6 +151,7 @@ class ReasoningAgent:
         """Run model→tool turns until the model stops calling tools or `iters` runs out.
         Returns the model's last non-empty text (the agent's own summary)."""
         last_text = ""
+        truncated = 0
         for i in range(iters):
             try:
                 resp = self.model.generate(
@@ -180,6 +190,18 @@ class ReasoningAgent:
                         "content": out,
                     })
                 messages.append({"role": "user", "content": results})
+            if resp.stop_reason == "max_tokens":
+                # The response was cut off at the output limit — often mid-tool-input,
+                # so the file never got written. Tell the model and let it retry rather
+                # than accepting a truncated turn as "finished".
+                truncated += 1
+                _log.warning("%s: response truncated at max_tokens (%d/%d)",
+                             self.agent_id, truncated, self._MAX_TRUNCATIONS)
+                self._emit("say", "(output limit hit — retrying with a smaller write)")
+                if truncated > self._MAX_TRUNCATIONS:
+                    return last_text
+                messages.append({"role": "user", "content": self._TRUNCATED})
+                continue
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
                 return last_text
         return last_text

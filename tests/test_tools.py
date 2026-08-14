@@ -33,6 +33,14 @@ class DenylistTest(unittest.TestCase):
         out = self.impls["read_file"](agent, None, {"path": "ARCHITECTURE.md"})
         self.assertEqual(out, "the design")
 
+    def test_truncated_tool_inputs_give_actionable_errors(self):
+        """A max_tokens truncation drops required keys — say so instead of KeyError."""
+        agent = _FakeAgent()
+        out = self.impls["write_artifact"](agent, None, {"section": "ui.py"})  # no content
+        self.assertIn("TRUNCATED", out)
+        out = self.impls["run_bash"](agent, None, {})  # no command
+        self.assertIn("TRUNCATED", out)
+
     def test_run_bash_refuses_command_touching_denied_section(self):
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root, True)

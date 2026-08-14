@@ -203,6 +203,45 @@ class AgentTest(unittest.TestCase):
                     self.assertTrue(isinstance(got, list)
                                     and any(b.get("type") == "tool_result" for b in got))
 
+    def test_truncated_turn_retries_instead_of_giving_up(self):
+        """max_tokens mid-write must not end the turn empty — the model gets told it was
+        truncated and retries (the programmer_ui 'DONE, wrote nothing' failure)."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        model = MockModel([
+            # 1) truncated mid-write_artifact: 'content' never arrived
+            ModelResponse(tool_calls=[ToolCall("t1", "write_artifact", {"section": "ui.py"})],
+                          stop_reason="max_tokens"),
+            # 2) after the truncation hint, it writes a smaller file successfully
+            ModelResponse(tool_calls=[ToolCall("t2", "write_artifact",
+                                               {"section": "ui.py", "content": "ok"})],
+                          stop_reason="tool_use"),
+            ModelResponse(text="done", stop_reason="end_turn"),
+        ])
+        agent = ReasoningAgent("ui", model, role="programmer", workspace=Workspace(root))
+        self.bb.register_agent("ui")
+        self.bb.send("user", "build the ui", to="ui")
+        agent.runner(self.bb, "ui", self.bb.poll_inbox("ui"))
+        self.assertEqual(agent.workspace.read_file("ui.py"), "ok")  # recovered and delivered
+
+    def test_truncation_retries_are_bounded(self):
+        """Endless truncation must stop, not spin."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        calls = {"n": 0}
+
+        def gen(messages):
+            calls["n"] += 1
+            return ModelResponse(tool_calls=[ToolCall("t", "write_artifact", {"section": "a.py"})],
+                                 stop_reason="max_tokens")
+
+        agent = ReasoningAgent("ui", MockModel([gen] * 40), role="reviewer",
+                               workspace=Workspace(root))
+        self.bb.register_agent("ui")
+        self.bb.send("user", "go", to="ui")
+        agent.runner(self.bb, "ui", self.bb.poll_inbox("ui"))
+        self.assertLessEqual(calls["n"], 6)  # bounded by _MAX_TRUNCATIONS, not max_iters
+
     def test_unknown_tool_is_reported_not_fatal(self):
         model = MockModel([
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),

@@ -165,7 +165,7 @@ class AnthropicModel(Model):
     """Calls real Claude. The SDK import is deferred to first use."""
 
     def __init__(self, model_id: str, *, effort: "str | None" = "high",
-                 max_tokens: int = 16000, use_thinking: bool = True, use_cache: bool = True):
+                 max_tokens: int = 32000, use_thinking: bool = True, use_cache: bool = True):
         self.model_id = model_id
         self.effort = effort
         self.max_tokens = max_tokens
@@ -207,8 +207,12 @@ class AnthropicModel(Model):
         return self._client
 
     def generate(self, *, system, messages, tools) -> ModelResponse:
+        """Non-streaming from the caller's view, but streamed on the wire: agents write
+        whole source files, so max_tokens is large and a plain create() would risk the
+        SDK's ~10-minute HTTP timeout (and the SDK refuses big non-streaming requests)."""
         client = self._client_lazy()
-        resp = client.messages.create(**self._kwargs(system, messages, tools))
+        with client.messages.stream(**self._kwargs(system, messages, tools)) as stream:
+            resp = stream.get_final_message()
         self._log_cache(getattr(resp, "usage", None))
         text = ""
         thinking = ""

@@ -86,6 +86,12 @@ def default_tool_impls() -> dict:
     """Return name -> callable(agent, blackboard, input) -> result string."""
 
     def write_artifact(agent, bb, inp):
+        if not inp.get("section") or inp.get("content") is None:
+            # Almost always a max_tokens truncation mid-tool-input: the JSON was cut
+            # off before 'content' arrived, so nothing was written.
+            return ("error: write_artifact needs both 'section' and 'content' — your tool "
+                    "input looks TRUNCATED (cut off at the output limit). Retry with a "
+                    "smaller file, writing one file per call.")
         ws = getattr(agent, "workspace", None)
         if ws is not None:
             # Write the real file; the agent logs all file changes to the blackboard
@@ -111,6 +117,9 @@ def default_tool_impls() -> dict:
         return "\n".join(files) if files else "(empty workspace)"
 
     def run_bash(agent, bb, inp):
+        if not inp.get("command"):
+            return ("error: run_bash needs a 'command' — your tool input looks TRUNCATED "
+                    "(cut off at the output limit). Retry with a shorter command.")
         ws = getattr(agent, "workspace", None)
         if ws is None:
             return "(no workspace available to run commands)"
