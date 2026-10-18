@@ -7,11 +7,19 @@ The gate *derives* its checks from what is in the workspace, because the caller
 does not know what the agents chose to write. Pixibot targets Python and C/C++
 (DESIGN.md §6), so:
 
-* a Python project with tests        -> ``pytest``
+* a Python project with tests        -> ``pytest``, then a **negative control**
 * a CMake project                    -> configure, build, ``ctest``
 * C/C++ sources with a Makefile      -> ``make``, and ``make test`` if that target exists
 * C/C++ sources with neither         -> a compile-only pass over every source
 * a mix                              -> both languages' checks, Python first
+
+The agents write their own tests, so a green suite on its own only says that
+the team agrees with itself. The **negative control** answers the other half:
+hide the implementation, run the suite again, and demand that it fails. A suite
+that passes with no code under it does not test the code.
+
+The control proves that *at least one* test depends on the implementation. It
+cannot prove that every test does.
 
 Checks run through a :class:`~pixibot.runtime.Executor`, so the gate runs in the
 same sandbox the agents do.
@@ -24,7 +32,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .runtime import DEFAULT_TIMEOUT, Executor, executor_for
 
@@ -72,10 +80,66 @@ class GateReport:
         return "\n\n".join(f"[{r.name}]\n{r.output[-clip:]}" for r in self.failures)
 
 
+#: Name of the check that proves the suite depends on the implementation.
+NEGATIVE_CONTROL = "negative-control"
+_HIDDEN = ".pixibot-hidden"      # suffix an implementation file wears while hidden
+_LIST = ".pixibot-impl.txt"      # the files we moved, so the restore is exact
+_LOG = ".pixibot-control.log"
+
+#: Files a test suite is meant to exercise: Python, not tests, not packaging,
+#: not under a dot-directory. The shell command below selects the same set.
+_FIND_IMPL = (
+    'find . -name "*.py" ! -name "test_*.py" ! -name "*_test.py" '
+    '! -name "conftest.py" ! -name "setup.py" ! -path "./.*" ! -path "*/.*"'
+)
+
+# One shell command, so the control runs through the same executor as every other
+# check - inside the container when there is one. It hides each implementation
+# file, runs the suite, restores every file it moved, then inverts the verdict:
+# a suite that still passes with no implementation under it has proven nothing.
+# The restore runs before the verdict, so a red control never leaves a
+# half-hidden workspace for the next check.
+_CONTROL_COMMAND = " ".join((
+    "set -u;",
+    f'{_FIND_IMPL} > {_LIST};',
+    f'if [ ! -s {_LIST} ]; then echo "no implementation file to hide";',
+    f'rm -f {_LIST}; exit 1; fi;',
+    f'while IFS= read -r f; do mv "$f" "$f{_HIDDEN}"; done < {_LIST};',
+    f"python3 -m pytest -q > {_LOG} 2>&1; rc=$?;",
+    f'while IFS= read -r f; do mv "$f{_HIDDEN}" "$f"; done < {_LIST};',
+    f"n=$(wc -l < {_LIST}); rm -f {_LIST};",
+    'if [ "$rc" -eq 0 ]; then',
+    'echo "THE SUITE PASSES WITH THE IMPLEMENTATION REMOVED.";',
+    'echo "It does not test the code. Write tests that import and exercise it.";',
+    f"tail -20 {_LOG}; rm -f {_LOG}; exit 1; fi;",
+    'echo "ok: the suite fails without the implementation ($n file(s) hidden)";',
+    f"rm -f {_LOG}; exit 0",
+))
+
+
+def implementation_files(files: Sequence[str]) -> tuple[str, ...]:
+    """The Python files a test suite is supposed to exercise.
+
+    Tests, packaging files and anything under a dot-directory are not
+    implementation: hiding them would prove nothing about the code.
+    """
+    return tuple(sorted(
+        f for f in files
+        if f.endswith(".py")
+        and not _PY_TEST.search(f)
+        and not f.startswith(".")
+        and "/." not in f
+        and PurePosixPath(f).name not in ("setup.py", "conftest.py")))
+
+
 def _python_checks(files: Sequence[str]) -> list[Check]:
-    if any(_PY_TEST.search(f) for f in files):
-        return [("pytest", "python3 -m pytest -q")]
-    return []
+    if not any(_PY_TEST.search(f) for f in files):
+        return []
+    checks = [("pytest", "python3 -m pytest -q")]
+    if implementation_files(files):
+        # The team wrote the suite, so a green suite is only half the answer.
+        checks.append((NEGATIVE_CONTROL, _CONTROL_COMMAND))
+    return checks
 
 
 def _cpp_checks(files: Sequence[str], read: Callable[[str], str | None]) -> list[Check]:
@@ -110,10 +174,15 @@ def checks_for(files: Sequence[str],
     return tuple(_python_checks(files) + _cpp_checks(files, read))
 
 
+#: Which checks belong to which language. A name not listed here is C/C++,
+#: and adding a Python check without adding it here would mislabel the project.
+_PYTHON_CHECK_NAMES = frozenset({"pytest", NEGATIVE_CONTROL})
+
+
 def language_of(checks: Sequence[Check]) -> str:
     names = {name for name, _ in checks}
-    python = "pytest" in names
-    cpp = bool(names - {"pytest"})
+    python = bool(names & _PYTHON_CHECK_NAMES)
+    cpp = bool(names - _PYTHON_CHECK_NAMES)
     if python and cpp:
         return "python+c/c++"
     if python:

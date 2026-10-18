@@ -10,7 +10,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pixibot.gates import GateReport, checks_for, language_of, run_gate
+from pixibot.gates import (
+    NEGATIVE_CONTROL,
+    GateReport,
+    checks_for,
+    implementation_files,
+    language_of,
+    run_gate,
+)
 from pixibot.runtime import ExecResult, LocalExecutor
 
 
@@ -32,15 +39,27 @@ class RecordingExecutor:
 
 
 class ChecksForTest(unittest.TestCase):
-    def test_python_project_with_tests_runs_pytest(self):
-        checks = checks_for(["app.py", "tests/test_app.py"])
-        self.assertEqual(checks, (("pytest", "python3 -m pytest -q"),))
+    def test_python_project_with_tests_runs_pytest_then_the_control(self):
+        names = [n for n, _ in checks_for(["app.py", "tests/test_app.py"])]
+        self.assertEqual(names, ["pytest", NEGATIVE_CONTROL])
+
+    def test_tests_with_no_implementation_get_no_control(self):
+        # nothing to hide, so the control would prove nothing
+        self.assertEqual([n for n, _ in checks_for(["tests/test_app.py"])], ["pytest"])
 
     def test_python_without_tests_has_nothing_to_check(self):
         self.assertEqual(checks_for(["app.py", "README.md"]), ())
 
     def test_trailing_test_name_also_counts(self):
-        self.assertEqual(len(checks_for(["app_test.py"])), 1)
+        self.assertEqual([n for n, _ in checks_for(["app_test.py"])], ["pytest"])
+
+    def test_implementation_files_excludes_tests_and_packaging(self):
+        files = ["app.py", "pkg/core.py", "tests/test_app.py", "app_test.py",
+                 "conftest.py", "setup.py", ".venv/lib/x.py", "docs/readme.md"]
+        self.assertEqual(implementation_files(files), ("app.py", "pkg/core.py"))
+
+    def test_implementation_files_of_a_test_only_tree_is_empty(self):
+        self.assertEqual(implementation_files(["tests/test_a.py"]), ())
 
     def test_cmake_project_configures_builds_and_runs_ctest(self):
         names = [n for n, _ in checks_for(["CMakeLists.txt", "src/main.cpp"])]
@@ -69,6 +88,9 @@ class ChecksForTest(unittest.TestCase):
         self.assertEqual(names[0], "pytest")      # the cheap check runs first
         self.assertIn("ctest", names)
         self.assertEqual(language_of(checks), "python+c/c++")
+
+    def test_the_control_counts_as_python_for_the_language_label(self):
+        self.assertEqual(language_of(checks_for(["a.py", "tests/test_a.py"])), "python")
 
     def test_language_of_names_the_single_language(self):
         self.assertEqual(language_of(checks_for(["tests/test_a.py"])), "python")
@@ -119,6 +141,69 @@ class RunGateTest(unittest.TestCase):
         report = run_gate(self.root, executor=LocalExecutor(self.root))
         self.assertFalse(report.passed)
         self.assertIn("test_add", report.summary())
+
+
+class NegativeControlTest(unittest.TestCase):
+    """The control runs for real here: it moves files and runs pytest twice."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def write(self, rel, text):
+        p = Path(self.root) / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+
+    def gate(self):
+        return run_gate(self.root, executor=LocalExecutor(self.root))
+
+    def test_a_suite_that_exercises_the_code_passes_the_control(self):
+        self.write("calc.py", "def add(a, b):\n    return a + b\n")
+        self.write("tests/test_calc.py",
+                   "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
+        report = self.gate()
+        self.assertTrue(report.passed, report.summary())
+        self.assertIn(NEGATIVE_CONTROL, [r.name for r in report.results])
+
+    def test_a_vacuous_suite_is_red_even_though_pytest_is_green(self):
+        self.write("calc.py", "def add(a, b):\n    return a + b\n")
+        self.write("tests/test_calc.py", "def test_truth():\n    assert True\n")
+        report = self.gate()
+        results = {r.name: r for r in report.results}
+        self.assertTrue(results["pytest"].passed)          # the team's own suite is green
+        self.assertFalse(results[NEGATIVE_CONTROL].passed)  # and proves nothing
+        self.assertFalse(report.passed)
+        self.assertIn("PASSES WITH THE IMPLEMENTATION REMOVED", report.summary())
+
+    def test_the_control_restores_every_file_it_moved(self):
+        self.write("calc.py", "def add(a, b):\n    return a + b\n")
+        self.write("pkg/core.py", "VALUE = 1\n")
+        self.write("tests/test_calc.py",
+                   "from calc import add\n\ndef test_add():\n    assert add(2, 2) == 4\n")
+        self.gate()
+        self.assertEqual((Path(self.root) / "calc.py").read_text(encoding="utf-8"),
+                         "def add(a, b):\n    return a + b\n")
+        self.assertTrue((Path(self.root) / "pkg/core.py").is_file())
+        left = list(Path(self.root).rglob("*.pixibot-hidden"))
+        self.assertEqual(left, [], f"files left hidden: {left}")
+
+    def test_the_control_leaves_no_scratch_files_behind(self):
+        self.write("calc.py", "def add(a, b):\n    return a + b\n")
+        self.write("tests/test_calc.py",
+                   "from calc import add\n\ndef test_add():\n    assert add(1, 1) == 2\n")
+        self.gate()
+        names = {p.name for p in Path(self.root).rglob("*")}
+        self.assertNotIn(".pixibot-impl.txt", names)
+        self.assertNotIn(".pixibot-control.log", names)
+
+    def test_a_red_suite_is_reported_before_the_control_matters(self):
+        self.write("calc.py", "def add(a, b):\n    return a - b\n")
+        self.write("tests/test_calc.py",
+                   "from calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n")
+        report = self.gate()
+        self.assertFalse(report.passed)
+        self.assertIn("pytest", [r.name for r in report.failures])
 
 
 class GateReportTest(unittest.TestCase):
