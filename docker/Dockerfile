@@ -2,7 +2,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git build-essential \
+    && apt-get install -y --no-install-recommends git build-essential cmake \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

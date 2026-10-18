@@ -59,6 +59,10 @@ class ContextManager:
     def is_registered(self, agent_id: str) -> bool:
         return agent_id in self._runners
 
+    def completed(self) -> frozenset[str]:
+        """The agents that have finished a turn in state DONE."""
+        return frozenset(self._done)
+
     def add_dependency(self, section_pattern: str, reader_agent_id: str) -> None:
         """Reader activates when an artifact is written to a matching section."""
         self._readers.append((section_pattern, reader_agent_id))

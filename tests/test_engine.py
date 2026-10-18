@@ -48,26 +48,51 @@ class EngineTest(unittest.TestCase):
         self.assertNotIn("auto_gate", self.engine.features)
         self.assertIn("continuous_testing", self.engine.features)
 
-    def test_derive_checks_requires_real_py_tests(self):
+    def _workspace(self):
         from pixibot.workspace import Workspace
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, True)
         self.engine.workspace = Workspace(d)
-        self.assertEqual(self.engine._derive_checks(), [])          # nothing to run
-        self.engine.workspace.write_file("tests/f1", "2 tests passing")  # not a .py file
-        self.assertEqual(self.engine._derive_checks(), [])          # still nothing
-        self.engine.workspace.write_file("tests/test_x.py", "def test_x():\n    assert True\n")
-        self.assertEqual(len(self.engine._derive_checks()), 1)      # now pytest runs
+        return self.engine.workspace
+
+    def test_gate_is_not_applicable_without_a_checkable_project(self):
+        ws = self._workspace()
+        self.assertFalse(self.engine.gate().applicable)      # nothing to run
+        ws.write_file("tests/f1", "2 tests passing")         # not a .py file
+        self.assertFalse(self.engine.gate().applicable)      # still nothing
 
     def test_gate_passes_on_green_suite(self):
-        from pixibot.workspace import Workspace
-        d = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, d, True)
-        self.engine.workspace = Workspace(d)
-        self.engine.workspace.write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
+        self._workspace().write_file("tests/test_ok.py", "def test_ok():\n    assert True\n")
         steps, gate = self.engine._gate_loop("r", 0)
         self.assertIsNotNone(gate)
-        self.assertTrue(gate[0])  # mechanical gate is green — no auto-revise triggered
+        self.assertTrue(gate.passed, gate.summary())   # green: no auto-revise triggered
+        self.assertEqual(gate.language, "python")
+        self.assertEqual(steps, 0)
+
+    def test_a_red_suite_is_reported_with_its_failure_text(self):
+        self._workspace().write_file("tests/test_bad.py", "def test_bad():\n    assert False\n")
+        report = self.engine.gate()
+        self.assertTrue(report.applicable)
+        self.assertFalse(report.passed)
+        self.assertIn("test_bad", report.summary())
+        self.assertIs(report, self.engine.last_gate)
+
+    def test_a_cpp_project_is_gated_on_its_own_toolchain(self):
+        ws = self._workspace()
+        ws.write_file("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n")
+        ws.write_file("main.cpp", "int main() { return 0; }\n")
+        import pixibot.gates as gates_mod
+        seen = []
+        real = gates_mod.run_check
+        try:
+            gates_mod.run_check = lambda name, cmd, ex, **kw: (
+                seen.append(cmd) or gates_mod.CheckResult(name, True, ""))
+            report = self.engine.gate()
+        finally:
+            gates_mod.run_check = real
+        self.assertEqual(report.language, "c/c++")
+        self.assertTrue(any("cmake" in c for c in seen))
+        self.assertTrue(any("ctest" in c for c in seen))
 
     def test_revise_adds_agent(self):
         self.engine.build_objective("thing")

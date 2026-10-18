@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 from pixibot.workspace import Workspace
 
@@ -19,7 +20,7 @@ class WorkspaceTest(unittest.TestCase):
     def test_write_read_roundtrip(self):
         self.ws.write_file("pkg/mod.py", "print('hi')")
         self.assertEqual(self.ws.read_file("pkg/mod.py"), "print('hi')")
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "pkg", "mod.py")))
+        self.assertTrue((Path(self.root) / "pkg" / "mod.py").is_file())
 
     def test_list_files(self):
         self.ws.write_file("a.py", "1")
@@ -40,7 +41,7 @@ class WorkspaceTest(unittest.TestCase):
         self.assertIn("from workspace", out)
 
     def test_read_binary_file_returns_none(self):
-        with open(os.path.join(self.root, "clip.bin"), "wb") as f:
+        with (Path(self.root) / "clip.bin").open("wb") as f:
             f.write(b"\xae\xff\x00\x10not utf-8")
         self.assertIsNone(self.ws.read_file("clip.bin"))  # binary -> None, never raises
 
@@ -53,17 +54,22 @@ class WorkspaceTest(unittest.TestCase):
         self.assertNotIn("pytest-of-dt/pytest-1/junk.txt", files)
         self.assertNotIn(".ffcheck/lib/pkg.py", files)
 
+    def test_a_symlink_out_of_the_tree_cannot_be_read(self):
+        (Path(self.root) / "out").symlink_to("/etc")
+        with self.assertRaises(ValueError):
+            self.ws.read_file("out/hostname")
+
     def test_run_refuses_parent_traversal(self):
         rc, out = self.ws.run("cat ../../etc/hostname")
         self.assertEqual(rc, 126)
         self.assertIn("confined", out)
 
     def test_run_refuses_absolute_home(self):
-        rc, out = self.ws.run("cat /home/someone/secret.txt")
+        rc, _ = self.ws.run("cat /home/someone/secret.txt")
         self.assertEqual(rc, 126)
 
     def test_run_refuses_key_file(self):
-        rc, out = self.ws.run("cat ant_key.txt")
+        rc, _ = self.ws.run("cat ant_key.txt")
         self.assertEqual(rc, 126)
 
     def test_run_scrubs_secrets_from_env(self):

@@ -1,39 +1,49 @@
 """Engine: a persistent run you can build, steer, and revise (DESIGN.md §5/§12/§15).
 
-Holds the blackboard + context-manager + agents for one run so interactions
-persist across turns (unlike a one-shot pipeline). `tell` posts a directive and
-resumes; `revise` re-invokes the TPM with the prior projection + feedback and
-splices in any new agents.
+Holds the blackboard, the scheduler and the agents for one run, so interactions
+persist across turns (unlike the one-shot :func:`pixibot.run.run_pipeline`).
+``tell`` posts a directive and resumes; ``revise`` re-invokes the TPM with the
+prior projection plus feedback and splices in any new agents.
+
+Each build is isolated: a fresh ``run_id`` and its own workspace directory, whose
+commands run in this engine's sandbox (DESIGN.md §11).
+
+Contract: docs/contracts/pixibot.engine.md
 """
 
 from __future__ import annotations
 
-import os
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import gates, observer, orchestrator, tpm
-from .agent import RunContext
+from .agent import EventHook, RunContext
 from .blackboard import KIND_DIRECTIVE, Blackboard
 from .context_manager import ActivationHook, ContextManager, StartHook
+from .gates import GateReport
 from .logbook import get as _get_logger
 from .model import Model
+from .runtime import executor_for
 from .workspace import Workspace
 
 _log = _get_logger("engine")
 
 ModelFactory = Callable[[dict[str, Any]], Model]
-# on_event(agent_id, kind, detail) - per-agent activity feed for the live panes
-EventHook = Callable[[str, str, str], None]
+Projection = dict[str, Any]
 
-# Greenfield-topology adoptions, each an on/off ablation arm.
+# Greenfield-topology adoptions, each an on/off ablation arm (decision 47).
 ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
 # auto_gate (adoption E's auto-replan) is OFF by default: a failing suite triggers extra
 # Opus re-plan rounds, so it's opt-in on cost grounds. Add it to engine.features to enable.
 DEFAULT_FEATURES = frozenset({"continuous_testing"})
 
+DEFAULT_WORKSPACE_BASE = "~/pixibot-workspace"
 
-def default_input(objective: str, *, hard: bool = False) -> dict:
+
+def default_input(objective: str, *, hard: bool = False) -> dict[str, Any]:
+    """The strict input for a one-line objective typed at the shell (§6)."""
     return {
         "objective": objective,
         "target": {"language": "python", "framework": "none", "platform": "linux"},
@@ -47,6 +57,8 @@ def default_input(objective: str, *, hard: bool = False) -> dict:
 
 
 class Engine:
+    """One steerable run: build, resume, tell, revise, gate, report."""
+
     def __init__(self, bb: Blackboard, tpm_model: Model, model_factory: ModelFactory,
                  *, max_steps: int = 200):
         self.bb = bb
@@ -54,38 +66,38 @@ class Engine:
         self.model_factory = model_factory
         self.max_steps = max_steps
         self.cm: ContextManager | None = None
-        self.projection: dict | None = None
+        self.projection: Projection | None = None
         self.on_activation: ActivationHook | None = None   # agent finished
         self.on_agent_start: StartHook | None = None       # agent started
         self.on_event: EventHook | None = None             # per-agent activity feed
         self.workspace: Workspace | None = None            # real project dir, per build
         self.workspace_base: str | None = None             # parent dir for workspaces
+        self.sandbox = "auto"      # container when docker answers, else confined host
         self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
-        self.last_gate = None      # (passed, [CheckResult]) from the most recent gate
+        self.last_gate: GateReport | None = None   # the most recent gate run
 
-    def _ensure_workspace(self):
+    # -- workspace -----------------------------------------------------------
+    def _new_workspace(self, run_id: str) -> Workspace:
+        """A per-run workspace whose commands run in this engine's sandbox."""
+        base = self.workspace_base or str(Path(DEFAULT_WORKSPACE_BASE).expanduser())
+        root = str(Path(base) / run_id)
+        return Workspace(root, executor_for(root, sandbox=self.sandbox))
+
+    def _ensure_workspace(self) -> Workspace:
         if self.workspace is None:
-            import os
-
-            from .workspace import Workspace
-            root = os.path.join(os.path.expanduser("~/pixibot-workspace"), self.bb.run_id)
-            self.workspace = Workspace(root)
+            self.workspace = self._new_workspace(self.bb.run_id)
         return self.workspace
 
-    def build(self, inp: dict) -> dict:
-        import os
-        import time
-
-        from .workspace import Workspace
-
+    # -- build ---------------------------------------------------------------
+    def build(self, inp: dict[str, Any]) -> dict[str, Any]:
+        """Plan a team for `inp`, run it to quiescence, and report what happened."""
         # Isolate this build: a fresh run_id (no stale agents/events from prior
         # builds) and its own workspace dir, so an accidental rebuild can never
         # wipe an earlier run's work. Old runs stay on disk for recovery.
         run_id = f"b{time.strftime('%Y%m%d-%H%M%S')}"
         self.bb.reset_run(run_id)
-        base = self.workspace_base or os.path.expanduser("~/pixibot-workspace")
-        self.workspace = Workspace(os.path.join(base, run_id))
+        self.workspace = self._new_workspace(run_id)
         _log.info("BUILD start run=%s objective=%r ws=%s",
                   run_id, inp.get("objective"), self.workspace.root)
 
@@ -96,55 +108,59 @@ class Engine:
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
         objective = self.projection.get("plan_summary") or inp.get("objective", "")
-        run = RunContext(workspace=self.workspace, on_event=self.on_event,
-                         objective=objective)
-        orchestrator.materialize(self.projection, self.cm, self.model_factory, run,
-                                 continuous=("continuous_testing" in self.features))
+        orchestrator.materialize(
+            self.projection, self.cm, self.model_factory,
+            RunContext(workspace=self.workspace, on_event=self.on_event, objective=objective),
+            continuous=("continuous_testing" in self.features))
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
 
-        gate = None
+        gate: GateReport | None = None
         if "auto_gate" in self.features:
             steps, gate = self._gate_loop(run_id, steps)
 
         _log.info("BUILD done run=%s steps=%d files=%d gate=%s",
                   run_id, steps, len(self.workspace.list_files()),
-                  gate[0] if gate else "n/a")
-        res = {"projection": self.projection, "steps": steps,
-               "workspace": self.workspace.root, "run_id": run_id}
+                  gate.passed if gate else "n/a")
+        res: dict[str, Any] = {"projection": self.projection, "steps": steps,
+                               "workspace": self.workspace.root, "run_id": run_id}
         if gate is not None:
-            res["gate_passed"], res["gate"] = gate
+            res["gate_passed"], res["gate"] = gate.passed, gate
         return res
 
-    # -- adoption E: mechanical gate + bounded failure-driven re-planning --------
-    def _derive_checks(self):
-        """Checks derived from the workspace: run pytest when real .py tests exist."""
-        files = self.workspace.list_files()
-        if any(f.endswith(".py") and "test" in os.path.basename(f) for f in files):
-            return [("pytest", "python3 -m pytest -q")]
-        return []
-
-    def _gate_loop(self, run_id: str, steps: int):
-        """Run the mechanical gate; on failure, auto-revise (bounded) and re-gate.
-        Returns (steps, (passed, results)) or (steps, None) when there's nothing to check."""
-        checks = self._derive_checks()
-        if not checks:
-            return steps, None
-        for attempt in range(self.max_gate_revises + 1):
-            passed, results = gates.checkpoint_gate(checks, cwd=self.workspace.root)
-            self.last_gate = (passed, results)
-            _log.info("GATE run=%s attempt=%d passed=%s", run_id, attempt, passed)
-            if passed or attempt == self.max_gate_revises:
-                return steps, (passed, results)
-            failing = "\n\n".join(f"[{r.name}]\n{r.output[-1500:]}"
-                                  for r in results if not r.passed)
-            steps += self.revise("mechanical gate failed — fix these:\n" + failing)
-            checks = self._derive_checks() or checks
-        return steps, self.last_gate
-
-    def build_objective(self, objective: str, *, hard: bool = False) -> dict:
+    def build_objective(self, objective: str, *, hard: bool = False) -> dict[str, Any]:
         return self.build(default_input(objective, hard=hard))
 
+    # -- the mechanical gate (adoption E) ------------------------------------
+    def gate(self) -> GateReport:
+        """Run the mechanical gate over this build's workspace, once.
+
+        The checks are derived from the files the agents wrote, not configured
+        here: see :func:`pixibot.gates.run_gate`.
+        """
+        ws = self._ensure_workspace()
+        report = gates.run_gate(ws.root, executor=ws.executor)
+        self.last_gate = report
+        return report
+
+    def _gate_loop(self, run_id: str, steps: int) -> tuple[int, GateReport | None]:
+        """Gate, and on failure re-plan (bounded) and gate again.
+
+        Returns (steps, report), or (steps, None) when there was nothing to check.
+        """
+        report = self.gate()
+        if not report.applicable:
+            return steps, None
+        for attempt in range(self.max_gate_revises + 1):
+            _log.info("GATE run=%s attempt=%d lang=%s passed=%s",
+                      run_id, attempt, report.language, report.passed)
+            if report.passed or attempt == self.max_gate_revises:
+                return steps, report
+            steps += self.revise("mechanical gate failed — fix these:\n" + report.summary())
+            report = self.gate()
+        return steps, report
+
+    # -- steer ---------------------------------------------------------------
     def resume(self) -> int:
         return self.cm.run() if self.cm else 0
 
@@ -154,19 +170,19 @@ class Engine:
         return self.resume()
 
     def revise(self, feedback: str) -> int:
-        """Re-plan from demo feedback; register + kick any newly-added agents."""
+        """Re-plan from demo feedback; register and kick any newly-added agents."""
         if not self.projection or not self.cm:
             raise RuntimeError("nothing to revise — build first")
         self.projection = tpm.revise(self.projection, feedback, self.tpm_model)
         deps = orchestrator.infer_deps(self.projection)
         new = [s for s in self.projection["agents"] if not self.cm.is_registered(s["id"])]
         objective = self.projection.get("plan_summary", "")
+        run = RunContext(workspace=self._ensure_workspace(), on_event=self.on_event,
+                         objective=objective)
         for spec in new:
-            run = RunContext(workspace=self._ensure_workspace(),
-                             on_event=self.on_event, objective=objective)
             orchestrator.register_one(spec, self.cm, self.model_factory, run)
             # only depend on agents that already completed, so new agents can start
-            self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm._done)
+            self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm.completed())
         for spec in new:
             self.bb.send("tpm", f"(revision) {feedback}", to=spec["id"])
         return self.resume()
