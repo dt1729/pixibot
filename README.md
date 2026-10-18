@@ -102,10 +102,20 @@ python3 -m pixibot.benchmark --provider claude-cli --arms default --only lru-cac
 pytest -m simulation            # the opt-in test tier (excluded from `pytest`)
 ```
 
-It is slower (seconds per turn, ~20k input tokens of CLI system prompt each) and
-non-deterministic, so it is never part of the default suite and is never auto-detected.
-The CLI runs with every tool blocked, no MCP server attached, permissions not skipped, the
-prompt on stdin, and its session transcript purged after each turn.
+It is slower (seconds per turn) and non-deterministic, so it is never part of the default
+suite and is never auto-detected. Two features are unavailable on this path: **thinking
+capture** (the CLI emits thinking blocks with no content) and **token streaming** (one
+envelope per turn).
+
+What it sends is measured, not assumed. `--restricted` takes an identical Pixibot turn
+from 65,782 total input tokens to 30,451, and `CLAUDE_CODE_PROMPT_CACHE_TTL=1h` keeps the
+remaining prefix a cache read for a whole build — so a compute ceiling spends uncached
+input plus output, never the cached prefix.
+
+The fence is proven rather than described: `ClaudeCliModel.probe_fence()` reads the CLI's
+init event, and the simulation tier fails if anything but `StructuredOutput` is attached.
+That probe found thirteen tools attached to what this file previously called a zero-tool
+agent (`docs/incidents.md` 009).
 
 ## Output: real files, in a sandbox
 

@@ -159,3 +159,32 @@ stalls everything downstream of it.
 count toward `completed()`. A dependent that runs with what exists beats a run that stalls
 behind a crashed or spent agent, and a checkpoint declared after one now falls due instead
 of never. Three tests cover it, and all three fail when the set is narrowed back to DONE.
+
+---
+
+## 009 — Thirteen tools were still attached to a "zero-tool" simulated agent (M49)
+
+**What happened.** The CLI provider shipped in M47 with `--allowedTools ""`,
+`--disallowedTools` naming twenty-two tools, an empty MCP config and
+`--strict-mcp-config`. The contract said it attached no tools. A probe of the CLI's own
+init event reported thirteen still attached: `DesignSync`, `EnterWorktree`,
+`ExitWorktree`, `ListAgents`, `ReportFindings`, `ScheduleWakeup`, `StructuredOutput`,
+`TaskCreate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop`, `TaskUpdate` — with
+`--restricted` on as well.
+
+**Why it survived.** The list was written from what a Pixibot agent would plausibly want
+to misuse, not from what the CLI actually offers. Nothing checked. Every unit test used a
+runner double, and the live tests asserted only that the *acting* tools (Bash, Write,
+WebFetch…) were absent — which was true, and not the question.
+
+**Prevention.** `ClaudeCliModel.probe_fence()` runs one real turn with
+`--output-format stream-json` and reads the init event, which announces what a session
+has before the model speaks. Twelve of the thirteen are now blocked by name;
+`StructuredOutput` stays, because `--json-schema` answers through it. The simulation tier
+asserts the full set rather than a hand-picked subset: anything beyond `StructuredOutput`
+fails. Re-probed after the fix: `['StructuredOutput']`, no MCP servers.
+
+**The general lesson.** The model's own answer is never evidence about its fence — that is
+`infra-pivot`'s rule, learned there when a model listed Bash, Read and Write that its init
+event proved absent. This incident is the mirror image: the *configuration's* claim was
+not evidence either.

@@ -30,8 +30,17 @@ class TokenUsageTest(unittest.TestCase):
         self.assertEqual((total.input, total.output, total.cached_input), (11, 22, 33))
 
     def test_cached_input_is_counted_in_input_too(self):
-        # a budget is about context size, not about the bill
         self.assertEqual(TokenUsage(input=100, output=0, cached_input=90).total, 100)
+
+    def test_billable_excludes_the_cached_prefix(self):
+        # a ceiling exists to stop spend, and a cache read costs about a tenth;
+        # on the CLI path the cached prefix is ~20k of harness prompt per turn
+        usage = TokenUsage(input=21000, output=500, cached_input=20000)
+        self.assertEqual(usage.total, 21500)
+        self.assertEqual(usage.billable, 1500)
+
+    def test_billable_never_goes_negative(self):
+        self.assertEqual(TokenUsage(input=5, output=1, cached_input=99).billable, 1)
 
     def test_an_unreported_turn_is_zero_not_an_error(self):
         self.assertEqual(ModelResponse(text="x").usage.total, 0)
@@ -80,6 +89,18 @@ class AgentBudgetTest(WithBlackboard, unittest.TestCase):
         agent = self.agent(budget=None, script=[costed(tokens=120)])
         self.activate(agent)
         self.assertEqual(agent.spent.total, 120)
+
+    def test_a_cached_prefix_does_not_consume_the_ceiling(self):
+        """The CLI path sends ~20k of harness prompt per turn, cached. Charging
+        an agent for it made a 40k ceiling buy two turns (incident 007)."""
+        cheap = ModelResponse(text="ok", stop_reason="end_turn",
+                              usage=TokenUsage(input=20500, output=200,
+                                               cached_input=20000))
+        agent = self.agent(budget=2000, script=[cheap, cheap, cheap])
+        self.activate(agent)
+        self.assertFalse(agent.over_budget, "cache reads must not spend the ceiling")
+        self.assertEqual(agent.spent.billable, 700)
+        self.assertGreater(agent.spent.total, 20000)
 
     def test_an_agent_with_no_ceiling_is_never_over_budget(self):
         agent = self.agent(budget=None, script=[costed(tokens=10**6)])

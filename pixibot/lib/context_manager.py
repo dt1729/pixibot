@@ -81,14 +81,18 @@ class ContextManager:
         return frozenset(self._finished)
 
     def spent(self) -> int:
-        """Tokens every registered agent has spent so far, as far as the models
-        reported. An agent whose runner is not a ReasoningAgent counts zero."""
+        """What every registered agent has spent, as far as the models reported.
+
+        Billable tokens (uncached input plus output), not context size: the same
+        measure an agent's own ceiling uses, so a run ceiling and an agent
+        ceiling mean the same thing.
+        """
         total = 0
         for runner in self._runners.values():
             agent = getattr(runner, "__self__", None)
             spent = getattr(agent, "spent", None)
             if spent is not None:
-                total += int(spent.total)
+                total += int(spent.billable)
         return total
 
     def add_dependency(self, section_pattern: str, reader_agent_id: str) -> None:

@@ -578,6 +578,21 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
     nothing. `DEFAULT_TASKS` now each need a team - multiple modules, a shared interface, a
     constraint that fights the obvious approach, deterministic-only behaviour - and the old
     set is kept as `SMOKE_TASKS` (`--set smoke`) for what it is good for.
+64. **A ceiling spends what a turn costs, not what it carries (M49):** `TokenUsage`
+    gains `billable` (uncached input plus output) and every ceiling uses it. The CLI path
+    sends ~20,000 cached tokens of harness prompt per turn, which the agent did not choose
+    to send and which costs about a tenth of fresh input; charging it made a 40,000 ceiling
+    buy two turns (incident 007). `total` remains, for talking about context size.
+65. **Send less, and keep it warm (M49):** `--restricted` cuts a measured Pixibot turn
+    from 65,782 total input tokens to 30,451 (cost $0.105 to $0.070), and
+    `CLAUDE_CODE_PROMPT_CACHE_TTL=1h` keeps the remaining prefix a cache read for a whole
+    build. Both come from `infra-pivot`'s measurements; the flag its judge deliberately
+    avoids is available to us because a simulated agent has no project hook to protect.
+66. **Prove the fence, do not describe it (M49):** `probe_fence()` reads the CLI's init
+    event, which announces what a session attached. It immediately found thirteen tools
+    attached to an agent the contract called zero-tool (incident 009). Twelve are now
+    blocked by name; `StructuredOutput` stays because `--json-schema` answers through it,
+    and the simulation tier asserts the whole set rather than a hand-picked subset.
 
 ---
 

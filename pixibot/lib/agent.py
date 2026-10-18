@@ -111,7 +111,7 @@ class ReasoningAgent:
         the projection did not set one, not that the agent may spend nothing.
         """
         ceiling = self.spec.compute_budget
-        return ceiling is not None and self.spent.total >= ceiling
+        return ceiling is not None and self.spent.billable >= ceiling
 
     # -- context rebuild (stateless) -----------------------------------------
     def _initial_messages(self, bb: Blackboard, events: list[Event]) -> list[dict[str, Any]]:
@@ -179,7 +179,7 @@ class ReasoningAgent:
         if self.over_budget:
             # Already spent: do not open a model turn at all (decision 14).
             _log.warning("%s: activated with no budget left (%d/%s)", agent_id,
-                         self.spent.total, self.spec.compute_budget)
+                         self.spent.billable, self.spec.compute_budget)
             return STATE_BUDGET_EXHAUSTED
         ws = self.run.workspace
         before = ws.snapshot() if ws is not None else None
@@ -227,10 +227,10 @@ class ReasoningAgent:
             _log.exception("%s: model.generate failed on turn %d", self.agent_id, turn)
             raise
         self.spent = self.spent + resp.usage
-        _log.info("%s turn %d: stop=%s tools=%d text=%dc think=%dc tokens=%d/%s",
+        _log.info("%s turn %d: stop=%s tools=%d text=%dc think=%dc spend=%d/%s ctx=%d",
                   self.agent_id, turn, resp.stop_reason, len(resp.tool_calls),
-                  len(resp.text), len(resp.thinking), self.spent.total,
-                  self.spec.compute_budget or "unbounded")
+                  len(resp.text), len(resp.thinking), self.spent.billable,
+                  self.spec.compute_budget or "unbounded", self.spent.total)
         return resp
 
     def _observe(self, bb: Blackboard, resp: ModelResponse) -> None:
@@ -287,7 +287,7 @@ class ReasoningAgent:
             if self.over_budget:
                 # Stop mid-loop rather than start a turn that cannot be paid for.
                 _log.warning("%s: compute budget spent (%d/%s) - stopping",
-                             self.agent_id, self.spent.total, self.spec.compute_budget)
+                             self.agent_id, self.spent.billable, self.spec.compute_budget)
                 return last_text
         return last_text
 

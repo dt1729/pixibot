@@ -53,7 +53,19 @@ class TokenUsage:
 
     @property
     def total(self) -> int:
+        """Everything that crossed the wire. Use it to talk about context size."""
         return self.input + self.output
+
+    @property
+    def billable(self) -> int:
+        """What the turn actually cost, give or take: uncached input plus output.
+
+        A compute ceiling exists to stop runaway spend, and a cache read costs
+        about a tenth of fresh input. Charging an agent for a cached prefix it
+        did not choose to send - 20,000 tokens of harness prompt, on the CLI
+        path - makes a ceiling meaningless (docs/incidents.md 007).
+        """
+        return max(0, self.input - self.cached_input) + self.output
 
     def __add__(self, other: TokenUsage) -> TokenUsage:
         return TokenUsage(self.input + other.input, self.output + other.output,

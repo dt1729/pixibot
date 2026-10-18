@@ -14,7 +14,9 @@ WINDOWS_FALLBACK: str                 # the winget path, reachable from WSL
 DEFAULT_TIMEOUT = 600
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TURNS = 6
+CACHE_TTL = "1h"
 CLI_ENV = "PIXIBOT_CLAUDE_CLI"
+REQUIRED_TOOLS = ("StructuredOutput",)   # --json-schema answers through it
 WINDOWS_GLOBS: tuple[str, ...]
 ACTING_TOOLS: tuple[str, ...]         # Claude Code tools a simulated agent must not have
 DISALLOWED_TOOLS: str                 # "mcp__*,<ACTING_TOOLS>"
@@ -24,8 +26,11 @@ Runner = Callable[[list[str], str], str]   # argv, stdin -> stdout (tests substi
 def find_cli(explicit: str | None = None) -> str
 def available(explicit: str | None = None) -> bool
 def windows_candidates() -> list[str]
+def child_env(environ: Mapping[str, str] | None = None) -> dict[str, str]
+def attached_tools(stdout: str) -> tuple[list[str], list[str]]
 def build_argv(cli: str, *, system: str, model: str, mcp_config: str,
-               max_turns: int = DEFAULT_MAX_TURNS) -> list[str]
+               max_turns: int = DEFAULT_MAX_TURNS, restricted: bool = True,
+               stream: bool = False) -> list[str]
 def render_prompt(messages: Sequence[Message], tools: Sequence[ToolDef]) -> str
 def parse_envelope(stdout: str) -> ModelResponse
 def transcript_dir(cwd: str | Path) -> Path
@@ -34,7 +39,8 @@ def purge_transcript(cwd: str | Path) -> None
 class ClaudeCliModel(Model):
     def __init__(self, model_id: str = DEFAULT_MODEL, *, cli: str | None = None,
                  timeout: int = DEFAULT_TIMEOUT, max_turns: int = DEFAULT_MAX_TURNS,
-                 runner: Runner | None = None)
+                 restricted: bool = True, runner: Runner | None = None)
+    def probe_fence(self) -> tuple[list[str], list[str]]   # (tools, mcp servers)
 
 class CliUnavailableError(RuntimeError)
 class CliFailedError(RuntimeError)
@@ -65,9 +71,23 @@ class CliFailedError(RuntimeError)
   Output that is not JSON at all does raise — a simulated turn that silently became empty
   text would read as an agent choosing to do nothing. A result that parses but does not
   match the schema yields an empty answer rather than a raise.
-- A turn costs about **20,000 input tokens** of Claude Code's own system prompt even with
-  `--system-prompt` replacing it. Per-agent compute ceilings written for API calls
-  therefore buy only two or three turns here: raise them when simulating.
+- `--restricted` removes the built-in tools. Measured on an identical Pixibot turn
+  (Haiku, same system prompt, tools and schema): total input 65,782 → 30,451 tokens, cost
+  $0.105 → $0.070. `infra-pivot`'s judge skips it because it makes Claude Code ignore
+  project settings, where that repo's hook lives; a simulated agent has no hook to protect.
+  It is on by default and can be turned off.
+- `child_env` sets `CLAUDE_CODE_PROMPT_CACHE_TTL=1h`, the longest the plan offers. Turns in
+  a build are seconds apart, so the harness prefix is read rather than rewritten — a read
+  refreshes the entry, which a two-hour clock experiment established.
+- What remains after that is **cached**, so it is not charged to an agent's ceiling: the
+  budget spends `TokenUsage.billable` (uncached input plus output).
+- **Thinking is not available** on this path. A probe showed the CLI emits thinking blocks
+  with zero characters of content, so `think <agent>` shows nothing for a simulated run.
+  Token streaming is unavailable too: one envelope per turn.
+- `probe_fence()` runs one real turn with `stream-json` and reads the **init event**, which
+  announces what the session attached before the model speaks. The model's own answer is
+  never evidence, and neither is the configuration's claim: this probe found thirteen tools
+  attached to what the contract described as a zero-tool agent (incident 009).
 - `find_cli` reads `$PIXIBOT_CLAUDE_CLI` before `PATH`, and **globs** the Windows account
   name rather than guessing it from the WSL home — those are two different names on the
   same machine, and guessing made the simulation tier skip itself.
@@ -143,8 +163,14 @@ which the agent loop treats as a turn that did nothing.
 - every globbed Windows candidate exists
 - the turn budget is at least 4, and is adjustable
 - an error that still produced an answer keeps the answer
+- `--restricted` is on by default and can be turned off; the stream form asks for the
+  init event
+- `child_env` requests the 1-hour cache TTL and carries the parent environment
+- `attached_tools` reads the init event, skips junk lines, and fails closed with no event
+- every tool the probe found is blocked by name; `StructuredOutput` is not
 - `simulation` tier (excluded by default, skipped with no CLI): a real turn returns a
-  tool call in our schema, and leaves no session transcript behind
+  tool call in our schema, leaves no session transcript behind, and attaches **nothing**
+  but `StructuredOutput`
 
 ## Deletion test
 

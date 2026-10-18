@@ -21,7 +21,9 @@ class ToolCall: id: str; name: str; input: dict[str, Any]
 class TokenUsage:
     input: int = 0; output: int = 0; cached_input: int = 0
     @property
-    def total(self) -> int              # input + output; what a budget is spent against
+    def total(self) -> int              # input + output: context size
+    @property
+    def billable(self) -> int           # uncached input + output: what a budget spends
     def __add__(self, other: TokenUsage) -> TokenUsage
 UNKNOWN_USAGE = TokenUsage()            # the provider reported nothing
 
@@ -68,7 +70,11 @@ class OpenAICompatModel(Model): def __init__(self, model_id, *, base_url,
   enforced against a model that reports nothing, and the engine logs that rather than
   pretending the run was free.
 - `TokenUsage.input` **includes** cached input, which is also reported separately in
-  `cached_input`. A budget is about context size, not about the bill.
+  `cached_input`. `total` is therefore context size; `billable` is uncached input plus
+  output, and that is what a compute ceiling spends. A cache read costs about a tenth of
+  fresh input, and on the CLI path the cached prefix is ~20,000 tokens of harness prompt
+  per turn that the agent did not choose to send — charging a ceiling for it made the
+  ceiling meaningless (docs/incidents.md 007).
 
 ## Seam
 
@@ -123,6 +129,7 @@ the run log against a named agent, which is the only place it can be attributed.
 - a tool call with unparseable arguments becomes an empty input rather than raising
 - usage is read from both provider shapes, and a missing usage object is zero not a raise
 - `TokenUsage` adds, and its total counts cached input once
+- `billable` excludes the cached prefix, and never goes negative
 - streamed tool-call fragments are reassembled in index order
 
 ## Deletion test

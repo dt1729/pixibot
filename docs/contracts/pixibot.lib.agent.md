@@ -71,6 +71,8 @@ class ReasoningAgent:
 - A spent agent is not nudged for a deliverable: the nudge costs a turn it cannot pay for.
 - `spent` is only as good as what the provider reports (see `pixibot.model`): against a
   model that reports no usage, the ceiling never trips.
+- The ceiling is spent against **billable** tokens (uncached input plus output), not
+  context size. A cached prefix the harness sends on every turn is not the agent's spend.
 - A tool that raises returns its error text to the model instead of failing the turn: the
   model is expected to read and recover.
 
@@ -142,6 +144,7 @@ to the model as text, which is the only one the model can act on.
 - reaching the ceiling ends the activation as `BUDGET_EXHAUSTED`
 - the loop stops at the ceiling rather than at `max_iters`
 - a spent agent that is re-activated opens no model turn
+- a cached prefix does not consume the ceiling
 
 ## Deletion test
 

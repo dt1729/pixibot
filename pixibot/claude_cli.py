@@ -24,6 +24,14 @@ flag is load-bearing:
   schema. Six, and adjustable.
 * ``--allowedTools ""`` blocks tool calls; ``--disallowedTools`` additionally
   strips the schemas, which is most of the prompt.
+* ``--restricted`` removes the built-in tools outright. Measured on an identical
+  Pixibot turn, it takes total input from 65,782 tokens to 30,451 and the cost
+  from $0.105 to $0.070. ``infra-pivot``'s judge skips it because it makes
+  Claude Code ignore project settings, where that repo's hook lives; a simulated
+  Pixibot agent runs in a temp directory with no hook to protect.
+* ``CLAUDE_CODE_PROMPT_CACHE_TTL=1h`` keeps the prefix warm for a whole build, so
+  the overhead is paid as cache reads rather than fresh input. A read refreshes
+  the entry, which a two-hour clock experiment in that repo established.
 * ``--mcp-config`` (empty) with ``--strict-mcp-config`` detaches every MCP
   server, so an operator's connectors cannot reach a simulated agent.
 * the prompt arrives on **stdin**, so its size is not an argv limit.
@@ -41,7 +49,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -73,16 +81,32 @@ DEFAULT_MODEL = "claude-sonnet-5"
 #: Turns the CLI may take to answer one Pixibot turn. One is too few to answer;
 #: two was too few for an agent prompt (a live build blocked on error_max_turns).
 DEFAULT_MAX_TURNS = 6
+#: Longest prompt-cache TTL the plan offers. Turns in a build are seconds apart,
+#: so the harness prefix stays warm and is read rather than rewritten.
+CACHE_TTL = "1h"
 
 #: Tools Claude Code offers that a simulated Pixibot agent must never have: it
 #: acts through Pixibot's own tools, and anything here would act behind the
 #: harness's back. Named explicitly, because --disallowedTools also strips their
 #: schemas from the prompt.
+#:
+#: The second group was found by :meth:`ClaudeCliModel.probe_fence`, not by
+#: reading the help: with --restricted on and the first group blocked, the init
+#: event still listed all of them. Evidence over assumption.
 ACTING_TOOLS = (
     "WebSearch", "WebFetch", "Bash", "PowerShell", "Read", "Write", "Edit", "NotebookEdit",
     "Glob", "Grep", "Agent", "Task", "Skill", "Workflow", "ToolSearch", "SendMessage",
     "TodoWrite", "CronCreate", "CronDelete", "CronList", "RemoteTrigger", "PushNotification",
+    # found attached by the fence probe, 2026-10-18
+    "DesignSync", "EnterWorktree", "ExitWorktree", "ListAgents", "ReportFindings",
+    "ScheduleWakeup", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop",
+    "TaskUpdate",
 )
+
+#: The one tool that must stay: `--json-schema` returns our shape through it, so
+#: blocking it breaks every turn. It writes nothing and reaches nothing.
+REQUIRED_TOOLS = ("StructuredOutput",)
+
 DISALLOWED_TOOLS = ",".join(("mcp__*", *ACTING_TOOLS))
 
 #: The shape we ask the CLI to return. Pixibot speaks tool calls, so the schema
@@ -181,14 +205,16 @@ def purge_transcript(cwd: str | Path) -> None:
         shutil.rmtree(transcript_dir(spelling), ignore_errors=True)
 
 
-def build_argv(cli: str, *, system: str, model: str, mcp_config: str,
-               max_turns: int = DEFAULT_MAX_TURNS) -> list[str]:
+def build_argv(  # noqa: PLR0913 - the parameters *are* the CLI's flags, one each
+        cli: str, *, system: str, model: str, mcp_config: str,
+        max_turns: int = DEFAULT_MAX_TURNS, restricted: bool = True,
+        stream: bool = False) -> list[str]:
     """The argv for one zero-tool turn (pure, so the flag set is testable)."""
-    return [
+    argv = [
         cli, "-p",
         "--mcp-config", mcp_config, "--strict-mcp-config",
         "--permission-mode", "default",
-        "--output-format", "json",
+        "--output-format", "stream-json" if stream else "json",
         "--max-turns", str(max_turns),
         "--allowedTools", "",
         "--disallowedTools", DISALLOWED_TOOLS,
@@ -197,6 +223,41 @@ def build_argv(cli: str, *, system: str, model: str, mcp_config: str,
         "--json-schema", json.dumps(RESPONSE_SCHEMA),
         "--model", model,
     ]
+    if stream:
+        argv.append("--verbose")       # stream-json needs it to emit the init event
+    if restricted:
+        # Removes the built-in tools: 54% less input on a measured Pixibot turn.
+        argv.append("--restricted")
+    return argv
+
+
+def child_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a CLI turn: the longest cache TTL the plan offers."""
+    env = dict(os.environ if environ is None else environ)
+    env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = CACHE_TTL
+    return env
+
+
+def attached_tools(stdout: str) -> tuple[list[str], list[str]]:
+    """(tools, mcp servers) the CLI reported in its init event.
+
+    Read from `--output-format stream-json`, which announces what a session has
+    before the model speaks. The model's own answer is never evidence: asked to
+    list its tools it has named tools the init event proved absent. Returns empty
+    lists when no init event was seen, so a caller fails closed.
+    """
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("type") == "system" and "tools" in event:
+            return (list(event.get("tools") or []),
+                    list(event.get("mcp_servers") or []))
+    return [], []
 
 
 def render_prompt(messages: Sequence[Message], tools: Sequence[ToolDef]) -> str:
@@ -292,7 +353,8 @@ Runner = Callable[[list[str], str], str]
 
 def _run(argv: list[str], prompt: str, *, cwd: str, timeout: int) -> str:
     proc = subprocess.run(argv, cwd=cwd, input=prompt, capture_output=True,
-                          text=True, encoding="utf-8", timeout=timeout, check=False)
+                          text=True, encoding="utf-8", timeout=timeout, check=False,
+                          env=child_env())
     if proc.returncode != 0 and not proc.stdout.strip():
         raise CliFailedError(f"the CLI exited {proc.returncode}: {proc.stderr[:300]}")
     return proc.stdout
@@ -307,10 +369,11 @@ class ClaudeCliModel(Model):
 
     def __init__(self, model_id: str = DEFAULT_MODEL, *, cli: str | None = None,
                  timeout: int = DEFAULT_TIMEOUT, max_turns: int = DEFAULT_MAX_TURNS,
-                 runner: Runner | None = None):
+                 restricted: bool = True, runner: Runner | None = None):
         self.model_id = model_id
         self.timeout = timeout
         self.max_turns = max_turns
+        self.restricted = restricted
         self._cli = cli
         self._runner = runner      # tests pass a double; production resolves the CLI
 
@@ -330,7 +393,8 @@ class ClaudeCliModel(Model):
                 empty.write_text('{"mcpServers": {}}', encoding="utf-8")
                 argv = build_argv(cli or "claude", system=system_text,
                                   model=self.model_id, mcp_config=str(empty),
-                                  max_turns=self.max_turns)
+                                  max_turns=self.max_turns,
+                                  restricted=self.restricted)
                 stdout = self._invoke(argv, prompt, tmp)
             finally:
                 purge_transcript(tmp)
@@ -339,11 +403,32 @@ class ClaudeCliModel(Model):
                   len(response.tool_calls), response.usage.total)
         return response
 
+    def probe_fence(self) -> tuple[list[str], list[str]]:
+        """What this configuration actually attaches: (tools, mcp servers).
+
+        Runs one real turn with `stream-json` and reads the init event, so the
+        fence is proven rather than trusted. Both lists empty is the pass.
+        """
+        cli = self._cli if self._runner is not None else find_cli(self._cli)
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                empty = Path(tmp) / "no_mcp.json"
+                empty.write_text('{"mcpServers": {}}', encoding="utf-8")
+                argv = build_argv(cli or "claude", system="Reply with an empty tool list.",
+                                  model=self.model_id, mcp_config=str(empty),
+                                  max_turns=self.max_turns, restricted=self.restricted,
+                                  stream=True)
+                stdout = self._invoke(argv, "Say ok and call nothing.", tmp)
+            finally:
+                purge_transcript(tmp)
+        return attached_tools(stdout)
+
     def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
                         tools: list[ToolDef],
                         on_delta: Callable[[str], None] | None = None) -> ModelResponse:
-        """No token streaming: `claude -p` returns one envelope. The whole text is
-        emitted once, which is what the base Model does."""
+        """No token streaming, and no thinking: `claude -p` returns one envelope,
+        and a probe showed its thinking blocks arrive with no content. The whole
+        text is emitted once, which is what the base Model does."""
         response = self.generate(system=system, messages=messages, tools=tools)
         if on_delta and response.text:
             on_delta(response.text)

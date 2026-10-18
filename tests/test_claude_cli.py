@@ -14,14 +14,19 @@ from pathlib import Path
 import pytest
 
 from pixibot.claude_cli import (
+    ACTING_TOOLS,
+    CACHE_TTL,
     CLI_ENV,
     DISALLOWED_TOOLS,
+    REQUIRED_TOOLS,
     RESPONSE_SCHEMA,
     ClaudeCliModel,
     CliFailedError,
     CliUnavailableError,
+    attached_tools,
     available,
     build_argv,
+    child_env,
     find_cli,
     parse_envelope,
     purge_transcript,
@@ -29,6 +34,8 @@ from pixibot.claude_cli import (
     transcript_dir,
     windows_candidates,
 )
+
+NEWLINE = chr(10)
 
 
 def envelope(result, *, is_error=False, usage=None, subtype="success"):
@@ -69,6 +76,18 @@ class ArgvTest(unittest.TestCase):
         for tool in ("mcp__*", "Bash", "Write", "WebFetch", "Task"):
             self.assertIn(tool, disallowed)
 
+    def test_the_tools_the_probe_found_are_blocked_by_name(self):
+        # the init event listed all of these with --restricted already on
+        for tool in ("TaskCreate", "ScheduleWakeup", "EnterWorktree", "ListAgents",
+                     "ReportFindings", "DesignSync"):
+            self.assertIn(tool, ACTING_TOOLS)
+
+    def test_the_schema_tool_is_not_blocked(self):
+        # --json-schema answers through StructuredOutput: blocking it breaks every turn
+        self.assertEqual(REQUIRED_TOOLS, ("StructuredOutput",))
+        for tool in REQUIRED_TOOLS:
+            self.assertNotIn(tool, ACTING_TOOLS)
+
     def test_no_mcp_server_can_attach(self):
         self.assertIn("--strict-mcp-config", self.argv)
         self.assertEqual(self.argv[self.argv.index("--mcp-config") + 1], "/tmp/no_mcp.json")
@@ -80,6 +99,56 @@ class ArgvTest(unittest.TestCase):
 
     def test_the_model_is_passed_through(self):
         self.assertEqual(self.argv[self.argv.index("--model") + 1], "claude-sonnet-5")
+
+    def test_restricted_is_on_by_default(self):
+        # measured: 65,782 total input tokens -> 30,451 on an identical turn
+        self.assertIn("--restricted", self.argv)
+
+    def test_restricted_can_be_turned_off(self):
+        argv = build_argv("claude", system="s", model="m", mcp_config="c", restricted=False)
+        self.assertNotIn("--restricted", argv)
+
+    def test_the_stream_form_asks_for_the_init_event(self):
+        argv = build_argv("claude", system="s", model="m", mcp_config="c", stream=True)
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", argv)
+
+    def test_the_default_form_is_a_single_envelope(self):
+        self.assertEqual(self.argv[self.argv.index("--output-format") + 1], "json")
+        self.assertNotIn("--verbose", self.argv)
+
+
+class ChildEnvTest(unittest.TestCase):
+    def test_the_longest_cache_ttl_is_requested(self):
+        self.assertEqual(child_env({})["CLAUDE_CODE_PROMPT_CACHE_TTL"], CACHE_TTL)
+        self.assertEqual(CACHE_TTL, "1h")
+
+    def test_the_parent_environment_is_carried(self):
+        self.assertEqual(child_env({"PATH": "/usr/bin"})["PATH"], "/usr/bin")
+
+
+class AttachedToolsTest(unittest.TestCase):
+    """The init event is evidence; the model's own answer is not."""
+
+    def test_the_init_event_is_read(self):
+        stream = NEWLINE.join([
+            json.dumps({"type": "system", "subtype": "init",
+                        "tools": ["Bash"], "mcp_servers": ["robinhood"]}),
+            json.dumps({"type": "result", "result": "{}"}),
+        ])
+        self.assertEqual(attached_tools(stream), (["Bash"], ["robinhood"]))
+
+    def test_an_empty_fence_reads_as_empty(self):
+        stream = json.dumps({"type": "system", "tools": [], "mcp_servers": []})
+        self.assertEqual(attached_tools(stream), ([], []))
+
+    def test_no_init_event_fails_closed(self):
+        self.assertEqual(attached_tools('{"type": "result"}'), ([], []))
+
+    def test_junk_lines_are_skipped(self):
+        stream = NEWLINE.join(
+            ["not json", json.dumps({"type": "system", "tools": ["Read"]})])
+        self.assertEqual(attached_tools(stream), (["Read"], []))
 
 
 class RenderPromptTest(unittest.TestCase):
@@ -278,6 +347,14 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(resp.tool_calls[0].name, "write_artifact")
         self.assertIn("reverse", resp.tool_calls[0].input.get("content", ""))
         self.assertGreater(resp.usage.total, 0)
+
+    def test_the_configuration_attaches_nothing_but_the_schema_tool(self):
+        """The init event is the evidence. Anything beyond StructuredOutput is a
+        tool the agent could use behind the harness's back."""
+        tools, servers = ClaudeCliModel("claude-haiku-4-5").probe_fence()
+        self.assertEqual(servers, [], f"an MCP server reached the agent: {servers}")
+        unexpected = sorted(set(tools) - set(REQUIRED_TOOLS))
+        self.assertEqual(unexpected, [], f"unblocked tools reached the agent: {unexpected}")
 
     def test_the_session_transcript_does_not_outlive_the_call(self):
         before = {p.name for p in (Path.home() / ".claude/projects").glob("*")}
