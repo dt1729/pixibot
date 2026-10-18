@@ -24,9 +24,13 @@ _log = _get_logger("cm")
 
 # runner(bb, agent_id, events) -> terminal lifecycle state (defaults to DONE)
 AgentRunner = Callable[[Blackboard, str, list[Event]], str | None]
-# barrier(agent_id) is called after each activation; return False to pause the run.
-# The agents not yet polled in that pass keep their inbox events, so a paused run
+# barrier(agent_id) is consulted BEFORE and AFTER each activation; return False to
+# pause the run. Before, so work that cannot be paid for is never started; after,
+# so a condition the activation itself created (a checkpoint falling due) stops
+# the pass. The agents not yet polled keep their inbox events, so a paused run
 # resumes exactly where it stopped.
+#
+# The argument is the agent about to run, or the one that just ran.
 Barrier = Callable[[str], bool]
 # on_agent_start(agent_id); on_activation(agent_id, terminal_state, sections_written)
 StartHook = Callable[[str], None]
@@ -126,6 +130,12 @@ class ContextManager:
     def step(self, barrier: Barrier | None = None) -> int:
         activated = 0
         for agent_id, runner in list(self._runners.items()):
+            if barrier is not None and not barrier(agent_id):
+                # Asked before the inbox is polled, so a refused activation keeps
+                # its events and resumes later rather than losing them.
+                self._paused = True
+                _log.info("pause before %s (barrier)", agent_id)
+                break
             events = self.bb.poll_inbox(agent_id)
             if not events:
                 continue

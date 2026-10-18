@@ -2,12 +2,22 @@
 
 A short *standards contract* goes into every agent's system prompt so the bar is
 always present; the full markdown docs in ``standards/`` are read on demand.
+
+The documents live **inside the package** (``pixibot/standards/``) rather than at
+the repo root. A module that reads files outside its own package depends on the
+repo layout, and that dependency broke silently when this module moved into
+``lib/`` at M41: the old path resolved to a directory that does not exist, so
+``load_standard`` raised and ``available_standards`` returned nothing for six
+milestones (docs/incidents.md 010).
+
+Contract: docs/contracts/pixibot.lib.standards.md
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+#: Package data, so this resolves the same from a clone or an installed wheel.
 _STD_DIR = Path(__file__).resolve().parent.parent / "standards"
 
 

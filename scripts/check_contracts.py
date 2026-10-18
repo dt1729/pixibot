@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Check that every public module has a contract, and that each contract is usable.
+"""Check that every public module has a contract and guidance, and that each contract
+is usable.
 
-Two rules, both mechanical:
+Three rules, all mechanical:
 
-1. **Coverage** — every module in ``pixibot/`` (the public surface) has a contract at
-   ``docs/contracts/<dotted.path>.md``. Modules under ``pixibot/lib/`` are internal, so a
-   contract there is welcome but not required.
-2. **Structure** — a contract carries every required section, a ``Status`` and ``Depth``,
+1. **Contract coverage** — every module in ``pixibot/`` (the public surface) has a
+   contract at ``docs/contracts/<dotted.path>.md``. Modules under ``pixibot/lib/`` are
+   internal, so a contract there is welcome but not required.
+2. **Guidance coverage** — ``pixibot/CLAUDE.md`` names every public module. A module the
+   folder guidance never mentions is invisible to the next reader, which is how
+   ``claude_cli`` arrived in M47 and sat unnamed until the guidance pass was re-run.
+3. **Structure** — a contract carries every required section, a ``Status`` and ``Depth``,
    at least one signature in a code block, a stated import direction, an error table (or
    the explicit "No error modes."), a logging level (or the explicit "No logging."), and
    at least three test behaviours.
@@ -26,6 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "pixibot"
 CONTRACTS = ROOT / "docs/contracts"
+GUIDANCE = PACKAGE / "CLAUDE.md"
 
 #: Entry-point plumbing with no interface of its own.
 EXEMPT = {"__init__", "__main__"}
@@ -115,6 +120,18 @@ def public_modules() -> list[Path]:
     return sorted(p for p in PACKAGE.glob("*.py") if p.stem not in EXEMPT)
 
 
+def unnamed_in_guidance() -> list[str]:
+    """Public modules the folder guidance never mentions.
+
+    Matched on the bare module name, which is how the guidance refers to them
+    (`engine`, not `pixibot/engine.py`).
+    """
+    if not GUIDANCE.exists():
+        return [m.stem for m in public_modules()]
+    text = GUIDANCE.read_text(encoding="utf-8")
+    return [m.stem for m in public_modules() if m.stem not in text]
+
+
 def main() -> int:
     problems: list[str] = []
 
@@ -124,6 +141,10 @@ def main() -> int:
             problems.append(f"{module.relative_to(ROOT)}: no contract at "
                             f"{contract.relative_to(ROOT)}")
 
+    for name in unnamed_in_guidance():
+        problems.append(f"{GUIDANCE.relative_to(ROOT)}: never names the public module "
+                        f"{name!r}")
+
     for contract in sorted(CONTRACTS.glob("*.md")):
         if contract.name.startswith("_"):      # the waiver ledger, not a contract
             continue
@@ -132,11 +153,11 @@ def main() -> int:
 
     count = len(list(CONTRACTS.glob("*.md")))
     if problems:
-        print(f"{len(problems)} contract problem(s):")
+        print(f"{len(problems)} problem(s):")
         for p in problems:
             print("  -", p)
         return 1
-    print(f"contracts: {count} valid, every public module covered")
+    print(f"contracts: {count} valid, every public module covered and named in guidance")
     return 0
 
 

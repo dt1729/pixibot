@@ -32,13 +32,10 @@ class RunContext:                # what every agent in one run shares
     on_event: EventHook | None = None
     objective: str = ""
 
-@dataclass(frozen=True)
-class Toolset:                   # how an agent affects the world
-    defs: list[dict]             # schemas the model sees
-    impls: Mapping[str, ToolImpl]
-
 class ReasoningAgent:
-    def __init__(self, spec: AgentSpec, run: RunContext | None = None, tools: Toolset | None = None)
+    def __init__(self, spec: AgentSpec, run: RunContext | None = None)
+    tool_defs: list[dict]            # the one tool surface, same for every agent
+    tool_impls: Mapping[str, ToolImpl]
     agent_id: str; role: str | None; workspace: Workspace | None; read_denylist: tuple[str, ...]
     spent: TokenUsage                    # this run's tokens, across every activation
     @property
@@ -78,15 +75,22 @@ class ReasoningAgent:
 
 ## Seam
 
-Three records in, one loop. `AgentSpec` varies per agent, `RunContext` per run, `Toolset`
-per policy — and `Model` behind the spec is the real external seam (`MockModel` in tests,
-two live providers in production).
+Two records in, one loop. `AgentSpec` varies per agent and `RunContext` per run — and
+`Model` behind the spec is the real external seam (`MockModel` in tests, three live
+providers in production).
 
-`Toolset` is injectable because the test-designer's tool surface is genuinely different
-(adoption D denies it implementation reads), and because tests substitute recording impls.
 `RunContext` exists so that a run-wide value is passed once rather than threaded through
 engine, materialize, register_one and the constructor — the shape that made adding one
 value a five-signature change.
+
+Rejected (and deleted at M50): a `Toolset` injection point. This contract previously
+justified it twice — "the test-designer's tool surface is genuinely different" and "tests
+substitute recording impls" — and **both were false in the code**: adoption D's blindness
+is enforced by `AgentSpec.read_denylist` inside the tool bodies, no test ever substituted
+a toolset, and no caller could reach the parameter, because the only production builder
+(`factory.make_agent`) did not pass it. One implementation and no substitution is a
+hypothetical seam, and lld-seed says those cost depth. The tool surface is now held
+directly on the agent.
 
 Rejected: keeping the 13-keyword constructor. DESIGN.md §1 defines an agent as one config
 over one loop; the code should say that, and the records make `dataclasses.replace` the
@@ -140,6 +144,7 @@ to the model as text, which is the only one the model can act on.
 - a truncated write is retried and then succeeds
 - endless truncation stops at the bound rather than spinning
 - an unknown tool name is reported to the model, not raised
+- an agent carries the one tool surface directly, with no injection point
 - an agent counts what its turns cost, and one with no ceiling is never over budget
 - reaching the ceiling ends the activation as `BUDGET_EXHAUSTED`
 - the loop stops at the ceiling rather than at `max_iters`

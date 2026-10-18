@@ -1,9 +1,10 @@
 """ReasoningAgent — a stateless agent that runs a tool loop per activation.
 
 DESIGN.md §1 defines an agent as *one config passed to the same loop*. That is
-literal here: an agent is an :class:`AgentSpec` (who it is), a :class:`RunContext`
-(what every agent in this run shares) and a :class:`Toolset` (how it affects the
-world). The loop is this class.
+literal here: an agent is an :class:`AgentSpec` (who it is) and a
+:class:`RunContext` (what every agent in this run shares). The loop is this
+class, and the tool surface is the same for every agent - what varies is which
+sections one may read (``AgentSpec.read_denylist``).
 
 Statelessness (DESIGN.md §9): each activation rebuilds context from the
 blackboard — the inbox events that woke it, its own stored transcript, and the
@@ -79,11 +80,15 @@ class Toolset:
 class ReasoningAgent:
     """The shared loop. One instance per projection agent."""
 
-    def __init__(self, spec: AgentSpec, run: RunContext | None = None,
-                 tools: Toolset | None = None):
+    def __init__(self, spec: AgentSpec, run: RunContext | None = None):
         self.spec = spec
         self.run = run or RunContext()
-        self.tools = tools or Toolset()
+        # The tool surface is the same for every agent. What varies per agent is
+        # which sections it may READ, and that is AgentSpec.read_denylist,
+        # enforced in the tool bodies. A Toolset seam stood here until M50 with
+        # one implementation and no substitution: a hypothetical seam costs depth.
+        self.tool_defs: list[dict[str, Any]] = list(DEFAULT_TOOL_DEFS)
+        self.tool_impls: Mapping[str, ToolImpl] = default_tool_impls()
         self.spent = TokenUsage()   # this run's tokens, across every activation
 
     # Attributes the harness reads off an agent (tool impls, scheduler, tests).
@@ -149,7 +154,7 @@ class ReasoningAgent:
         return content  # may be empty (no text, no tools) — caller skips appending it
 
     def _run_tool(self, tc: ToolCall, bb: Blackboard) -> str:
-        impl = self.tools.impls.get(tc.name)
+        impl = self.tool_impls.get(tc.name)
         if impl is None:
             return f"error: unknown tool '{tc.name}'"
         try:
@@ -221,7 +226,7 @@ class ReasoningAgent:
     def _generate(self, messages: list[dict[str, Any]], turn: int) -> ModelResponse:
         try:
             resp = self.spec.model.generate(
-                system=self.spec.system_prompt, messages=messages, tools=self.tools.defs
+                system=self.spec.system_prompt, messages=messages, tools=self.tool_defs
             )
         except Exception:
             _log.exception("%s: model.generate failed on turn %d", self.agent_id, turn)

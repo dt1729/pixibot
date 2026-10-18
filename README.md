@@ -160,7 +160,8 @@ A pass is a **green mechanical gate** and nothing else — "no tests to run" is 
   - `cli.py`, `tui.py`, `benchmark.py`, `demo.py` — the entry points
   - `lib/` — **internals** (private): the agent loop, scheduler, orchestrator, planner,
     prompt building, tool bodies, terminal styling, run log, completion, offline models
-- `standards/` — the judgment half of the coding standards, injected into agent prompts
+- `pixibot/standards/` — the judgment half of the coding standards, read by the agents at
+  run time (package data, so it resolves from a clone or an installed wheel)
 - `docs/contracts/` — one contract per module; `docs/incidents.md` — what went wrong and why
 - `docker/` — the per-run sandbox image
 - `scripts/check_contracts.py` — fails the commit if a public module has no contract

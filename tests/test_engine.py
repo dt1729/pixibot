@@ -150,6 +150,20 @@ class RunBudgetTest(WithBlackboard, unittest.TestCase):
                    if self.bb.read_section(s) is not None]
         self.assertLess(len(written), 3, f"the run spent its ceiling but wrote {written}")
 
+    def test_tell_and_revise_spend_under_the_run_ceiling(self):
+        """engine.md promises the ceiling is checked after every activation.
+        resume() - which tell and revise go through - ran bare until M50."""
+        eng = self.engine()
+        inp = default_input("thing")
+        inp["budget_ceilings"]["compute"] = 100000      # room for the build
+        eng.build(inp)
+        before = eng.spent()
+        eng._ceiling = before                            # nothing left to spend
+        steps = eng.tell("prog-f1", "use a dataclass")
+        self.assertEqual(steps, 0, "a spent run must not activate on a directive")
+        self.assertEqual(eng.spent(), before)
+        self.assertFalse(eng.within_budget())
+
     def test_an_unreadable_ceiling_does_not_stop_the_run(self):
         eng = self.engine()
         inp = default_input("thing")

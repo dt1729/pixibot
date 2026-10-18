@@ -593,6 +593,24 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
     attached to an agent the contract called zero-tool (incident 009). Twelve are now
     blocked by name; `StructuredOutput` stays because `--json-schema` answers through it,
     and the simulation tier asserts the whole set rather than a hand-picked subset.
+67. **A module with no contract is invisible to every gate (M50):** the standards
+    documents were unreachable from M41 to M50 because the module that reads them had no
+    contract and no test, so six milestones of green gates said nothing about it
+    (incident 010). The documents now ship **inside** the package, because a module that
+    reads files outside its own package depends on the repo layout — and that is the
+    dependency that broke. Every private module that holds behaviour gets a contract.
+68. **The barrier is asked before an activation as well as after (M50):** it was a
+    post-activation check, which suits a checkpoint (an agent must finish before its
+    checkpoint can fall due) but not a budget — a spent run still paid for one more
+    activation. Asked both times, the barrier itself decides which it means, and a refused
+    activation keeps its inbox events for the resume. `resume()` now carries the budget
+    barrier, so `tell` and `revise` are bounded like a build.
+69. **A finding is not a defect until a skeptic fails to kill it (M50):** the second
+    lld-seed pass raised 77 findings; of the six claiming highest severity, five were
+    refuted — two misstated their consequence, two carried a dishonest severity, one
+    proposed a worse trade. Four of those five were partly right underneath, which is what
+    makes an unrefuted finding dangerous rather than merely noisy. Findings that were never
+    refuted are published as UNVERIFIED, not dropped and not promoted (incident 011).
 
 ---
 

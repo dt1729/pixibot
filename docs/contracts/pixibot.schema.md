@@ -12,6 +12,8 @@ Decide whether a request or a plan is well-formed, and get a valid one out of a 
 ```python
 DEPTHS = {"junior", "senior", "principal"}
 
+def compute_ceiling(raw: Any) -> int | None
+
 def validate_input(inp: Any) -> list[str]
 def validate_projection(proj: Any) -> list[str]
 
@@ -28,6 +30,12 @@ def obtain_valid(generate: Callable[[list[str]], Any],
   (`projection.agents[2].budget.depth`) and what was expected.
 - Validation is **structural only**: shapes, types and enum membership. Whether an
   objective is sensible is not a schema question and is not pretended to be one.
+- `compute_ceiling` reads a token ceiling out of whatever a model or a form wrote —
+  `40000`, `"40000"`, `"40k"` — and returns `None` for anything unparseable, zero or
+  negative. `None` means **unbounded**, never zero: a budget nobody can parse must not
+  stop a run before it starts. It lives here because both ceilings read the same loose
+  value, and it was duplicated verbatim in `engine` and `factory` until M50, where the two
+  copies could have diverged.
 - `validate_input` accepts anything (`Any`) because the caller may be handing over a
   parsed form or a model's JSON; a non-object is one error, not a crash.
 - `obtain_valid` is the **bounded repair loop** (decision for §15 Q1): it calls
@@ -79,6 +87,8 @@ return value and the exception, which is where the caller shows them.
 - `obtain_valid` returns the first valid candidate without further attempts
 - `obtain_valid` passes the previous attempt's errors to the next call
 - `obtain_valid` raises `ValidationFailed` after `max_attempts`, carrying the last errors
+- `compute_ceiling` reads an int, a string and a "k" suffix identically, and reads
+  nonsense, zero and a negative as `None`
 
 ## Deletion test
 

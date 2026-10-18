@@ -10,8 +10,8 @@ What lives here and why:
   scheduler, the materializer and the prompt builder. A caller drives these
   through :class:`pixibot.engine.Engine`, never directly.
 * ``tpm`` - the planning agent, reached through the engine.
-* ``tools`` - the tool bodies an agent is given; the surface that configures them
-  is ``Toolset``, which is in ``agent`` here, because an agent is an internal.
+* ``tools`` - the tool bodies every agent is given. What varies per agent is
+  which sections it may read, which is ``AgentSpec.read_denylist``.
 * ``standards``, ``console``, ``logbook``, ``completion``, ``mockrun`` -
   prompt text, terminal styling, the run log, shell completion and the offline
   scripted models.

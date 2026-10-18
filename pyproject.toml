@@ -35,6 +35,11 @@ pixibot = "pixibot.cli:main"
 [tool.setuptools.packages.find]
 include = ["pixibot*"]
 
+# The standards documents are read at run time by pixibot.lib.standards, so they
+# ship with the package rather than sitting beside it in the repo.
+[tool.setuptools.package-data]
+pixibot = ["standards/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The simulation tier calls the Claude Code CLI: seconds per turn, real

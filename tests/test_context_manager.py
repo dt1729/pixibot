@@ -83,20 +83,38 @@ class BarrierTest(WithBlackboard, unittest.TestCase):
             return STATE_DONE
         return runner
 
-    def test_a_barrier_pauses_the_pass_and_the_rest_keep_their_events(self):
+    def test_a_closed_barrier_starts_nothing_and_loses_no_events(self):
+        """Asked before an activation, so work that cannot be paid for is never
+        started and the agents keep their inbox events for the resume."""
         order = []
         cm = ContextManager(self.bb, max_steps=10)
         for name in ("a", "b", "c"):
             cm.register(name, self._agent(name, order))
             self.bb.send("tpm", "go", to=name)
 
-        cm.run(barrier=lambda agent_id: False)      # pause after the first one
+        cm.run(barrier=lambda agent_id: False)
+        self.assertEqual(order, [], "a closed barrier must not spend an activation")
+        self.assertTrue(cm.paused)
+
+        cm.run()                                    # resume: all three still run
+        self.assertEqual(sorted(order), ["a", "b", "c"])
+        self.assertFalse(cm.paused)
+
+    def test_a_barrier_that_closes_mid_pass_pauses_there(self):
+        """Asked after an activation too, so a condition the activation itself
+        created - a checkpoint falling due - stops the pass."""
+        order = []
+        cm = ContextManager(self.bb, max_steps=10)
+        for name in ("a", "b", "c"):
+            cm.register(name, self._agent(name, order))
+            self.bb.send("tpm", "go", to=name)
+
+        cm.run(barrier=lambda agent_id: len(order) < 1)   # closes once one has run
         self.assertEqual(len(order), 1)
         self.assertTrue(cm.paused)
 
-        cm.run()                                    # resume: the other two still run
+        cm.run()
         self.assertEqual(len(order), 3)
-        self.assertFalse(cm.paused)
 
     def test_no_barrier_runs_to_quiescence(self):
         order = []

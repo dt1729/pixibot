@@ -188,3 +188,54 @@ fails. Re-probed after the fix: `['StructuredOutput']`, no MCP servers.
 `infra-pivot`'s rule, learned there when a model listed Bash, Read and Write that its init
 event proved absent. This incident is the mirror image: the *configuration's* claim was
 not evidence either.
+
+---
+
+## 010 — The standards documents were unreachable for six milestones (M41 to M50)
+
+**What happened.** `pixibot.lib.standards` read its documents through
+`Path(__file__).resolve().parent.parent / "standards"`. That was correct while the module
+sat at `pixibot/standards.py`. M41 moved it to `pixibot/lib/standards.py` as part of the
+entry-point boundary, and the same expression then resolved to `pixibot/pixibot/standards`,
+which does not exist. From M41 to M50, `available_standards()` returned `[]` and
+`load_standard("lld.md")` raised `FileNotFoundError`. Decision 21 authored four standards
+documents and decision 33 injects them progressively; the on-demand half of that was dead.
+
+**Why it survived.** Nothing imported either function. `standards_contract()` — the
+always-in-prompt half — is a constant string, so the one caller
+(`pixibot.lib.factory`) kept working and every agent prompt still carried the summary. The
+module had no contract and no test, so the gates had nothing to check: ruff, mypy,
+import-linter and 321 tests all passed over a broken feature. The only reason it surfaced
+is that the lld-seed audit was re-run and one agent followed the path by hand.
+
+**Prevention.** The documents moved **inside** the package (`pixibot/standards/`, shipped
+as package data), so the module reads its own package rather than depending on the repo
+layout — the dependency that broke. `tests/test_standards.py` asserts the directory
+exists, every document is discoverable, every discoverable document loads, a missing one
+raises, and the path resolves inside the package. Reverting the path fails three of them.
+The module now has a contract, which is the thing its silence cost it.
+
+**The general lesson.** A module with no contract and no test is invisible to every gate
+in the repo. Six milestones of green gates said nothing about it, because nothing had ever
+claimed what it should do.
+
+---
+
+## 011 — Five of six top-severity audit findings did not survive a skeptic (M50)
+
+**What happened.** The second lld-seed pass ran six audit agents over the repo; they raised
+77 findings. The six that claimed the highest severity each went to a separate agent
+prompted to **refute by default**. Five were refuted: two misstated their consequence, two
+were real observations carrying a dishonest severity, and one proposed a fix that traded a
+small cost for a larger one. One survived — an injection point with a single
+implementation.
+
+**Why it matters.** Four of the five refutations were *partly* right: the quoted evidence
+was accurate and a narrower defect was real underneath the overstated claim. A report that
+had published the six as-is would have sent someone to change working code in five places,
+and the credible-looking severity is exactly what makes that dangerous.
+
+**Prevention.** The refutation stage is not optional in this workflow, and findings that
+were never refuted are published as UNVERIFIED rather than quietly dropped or quietly
+promoted. The four defects fixed in M50 were each verified by hand — path resolved, grep
+run, barrier traced — before any code moved.

@@ -28,6 +28,7 @@ from .lib.context_manager import ActivationHook, ContextManager, StartHook
 from .lib.logbook import get as _get_logger
 from .model import Model
 from .runtime import executor_for
+from .schema import compute_ceiling
 from .workspace import Workspace
 
 _log = _get_logger("engine")
@@ -99,22 +100,15 @@ class Engine:
         return self.workspace
 
     # -- build ---------------------------------------------------------------
-    def _ceiling_of(self, inp: dict[str, Any]) -> int | None:
+    @staticmethod
+    def _ceiling_of(inp: dict[str, Any]) -> int | None:
         """The run's token ceiling from budget_ceilings.compute, or None.
 
-        Unreadable is None rather than zero: a budget nobody can parse must not
-        stop a run before it starts (decision 14).
+        Read by :func:`pixibot.schema.compute_ceiling`, the same function the
+        per-agent ceiling uses - so a run ceiling and an agent ceiling can never
+        read the same value differently.
         """
-        raw = (inp.get("budget_ceilings") or {}).get("compute")
-        if raw is None:
-            return None
-        try:
-            ceiling = int(float(str(raw).strip().rstrip("kK") or 0))
-        except (TypeError, ValueError):
-            return None
-        if str(raw).strip().lower().endswith("k"):
-            ceiling *= 1000
-        return ceiling if ceiling > 0 else None
+        return compute_ceiling((inp.get("budget_ceilings") or {}).get("compute"))
 
     def spent(self) -> int:
         """Tokens this run has spent, as far as the models reported."""
@@ -304,7 +298,13 @@ class Engine:
 
     # -- steer ---------------------------------------------------------------
     def resume(self) -> int:
-        return self.cm.run() if self.cm else 0
+        """Drive the registered team again, under the run's compute ceiling.
+
+        `tell` and `revise` resume through here, and they spend tokens like any
+        other activation - so the ceiling applies to them too. Running bare here
+        was the gap between engine.md's "after **every** activation" and the code.
+        """
+        return self.cm.run(barrier=self._budget_barrier) if self.cm else 0
 
     def tell(self, agent_id: str, directive: str) -> int:
         """Post a directive and resume — the agent picks it up (non-blocking chat)."""

@@ -72,6 +72,24 @@ class CeilingParsingTest(unittest.TestCase):
         self.assertIsNone(self.spec(-5).compute_budget)
 
 
+class CeilingSharedParserTest(unittest.TestCase):
+    """One parser for both ceilings: a run ceiling and an agent ceiling must
+    never read the same value differently (it was duplicated until M50)."""
+
+    def test_the_engine_and_the_factory_read_the_same_values(self):
+        from pixibot.engine import Engine
+        from pixibot.schema import compute_ceiling
+        for raw, expected in ((40000, 40000), ("40000", 40000), ("40k", 40000),
+                              ("  40K ", 40000), (None, None), ("lots", None),
+                              (0, None), (-5, None)):
+            with self.subTest(raw=raw):
+                run_side = Engine._ceiling_of({"budget_ceilings": {"compute": raw}})
+                agent_side = compute_ceiling(raw)
+                self.assertEqual(run_side, expected)
+                self.assertEqual(agent_side, expected)
+                self.assertEqual(run_side, agent_side)
+
+
 class AgentBudgetTest(WithBlackboard, unittest.TestCase):
     run_id = "bud"
 
@@ -143,6 +161,15 @@ class AgentBudgetTest(WithBlackboard, unittest.TestCase):
         state = self.activate(agent)               # woken again
         self.assertEqual(state, STATE_BUDGET_EXHAUSTED)
         self.assertEqual(len(turns), spent_after_first, "it must not call the model again")
+
+    def test_an_agent_carries_the_one_tool_surface_directly(self):
+        """Toolset was an injection point with one implementation and no
+        substitution; M50 deleted it. The surface is still there."""
+        agent = self.agent(budget=None, script=[costed()])
+        self.assertFalse(hasattr(agent, "tools"))
+        self.assertIn("write_artifact", agent.tool_impls)
+        self.assertEqual([d["name"] for d in agent.tool_defs][:2],
+                         ["write_artifact", "read_file"])
 
     def test_an_agent_within_budget_finishes_normally(self):
         agent = self.agent(budget=10000, script=[costed(tokens=100)])

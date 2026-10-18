@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..model import Model
+from ..schema import compute_ceiling
 from .agent import AgentSpec, ReasoningAgent, RunContext
 from .standards import standards_contract
 
@@ -196,7 +197,7 @@ def agent_spec(spec: dict[str, Any], model: Model, *,
     depth = budget.get("depth", "senior")
     role = spec.get("role", "specialist")
     return AgentSpec(
-        compute_budget=_compute_ceiling(budget),
+        compute_budget=compute_ceiling(budget.get("compute")),
         agent_id=spec["id"],
         model=model,
         system_prompt=build_system_prompt(role, depth),

@@ -55,7 +55,10 @@ class Engine:
 - `revise` requires a prior `build` (it needs a projection to revise) and only registers
   agents the scheduler does not already know. New agents depend only on agents that have
   **already completed**, so they can start immediately.
-- `resume` is safe to call at any time and returns 0 when there is nothing to drive.
+- `resume` is safe to call at any time and returns 0 when there is nothing to drive. It
+  drives the scheduler **under the run's compute ceiling**, so `tell` and `revise` — which
+  resume through it — are bounded too. It ran bare until M50, which is what made this
+  contract's "after **every** activation" false for the steer path.
 - `gate` runs the mechanical gate once over the current workspace, in that workspace's
   sandbox, and records the report on `last_gate`.
 - `sandbox` is `"auto"`, `"docker"` or `"local"` and is read at **workspace creation**:
@@ -129,6 +132,8 @@ continues, which is what keeps one bad activation from losing the whole build.
 - a run with no ceiling is always within budget
 - a ceiling smaller than one agent turn stops the cascade before every section is written
 - an unreadable ceiling leaves the run unbounded
+- a spent run does not activate on a directive (`tell` returns 0 steps)
+- the run ceiling and an agent ceiling read the same value identically
 
 ## Deletion test
 

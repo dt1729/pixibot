@@ -15,6 +15,10 @@ models behind it, the substrate it coordinates on, and the three front ends.
   subprocess).
 - `gates` / `checkpoints` — the mechanical verdict and the human one.
 - `model` — `Model`, `MockModel`, `AnthropicModel`, `OpenAICompatModel`.
+- `claude_cli` — `ClaudeCliModel`: a model answered by the Claude Code CLI, so a run
+  can be simulated against a real model on a subscription rather than an API key.
+  Its `probe_fence()` reads the CLI's init event, which is how the "no tools, no MCP
+  server" claim is proven instead of asserted.
 - `schema`, `intake` — strict-input validation and the markdown request form.
 - `observer`, `interaction` — the run report, and talking to agents without pausing them.
 - `cli`, `tui`, `benchmark`, `demo` — entry points.
@@ -46,5 +50,4 @@ modules here deliberately log nothing), `design-patterns` (two implementations b
 Protocol: `Executor` and `Provider` qualify, nothing else does).
 
 <!-- manual -->
-Hand-written note that must survive.
 <!-- /manual -->

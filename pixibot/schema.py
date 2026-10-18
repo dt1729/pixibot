@@ -32,6 +32,25 @@ def _require(
     return val
 
 
+def compute_ceiling(raw: Any) -> int | None:
+    """A token ceiling from whatever a model or a form wrote, or None.
+
+    ``40000``, ``"40000"`` and ``"40k"`` all read; anything unparseable, zero or
+    negative reads as None. None means **unbounded**, never zero: a budget nobody
+    can parse must not stop a run before it starts (DESIGN.md decision 14).
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    try:
+        ceiling = int(float(text.rstrip("kK") or 0))
+    except (TypeError, ValueError):
+        return None
+    if text.lower().endswith("k"):
+        ceiling *= 1000
+    return ceiling if ceiling > 0 else None
+
+
 def validate_input(inp: Any) -> list[str]:
     """Validate a strict input request. Returns error strings ([] == valid)."""
     errors: list[str] = []
