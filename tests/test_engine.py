@@ -1,32 +1,26 @@
 """Integration tests for the Engine: build cascade, directive-resume, revision."""
 
-import os
 import shutil
 import tempfile
 import unittest
 
-from pixibot.blackboard import Blackboard
 from pixibot.engine import Engine
 from pixibot.lib import mockrun
 
+from .support import WithBlackboard
 
-class EngineTest(unittest.TestCase):
+
+class EngineTest(WithBlackboard, unittest.TestCase):
+    run_id = "eng"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="eng")
+        super().setUp()
         self.engine = Engine(self.bb, mockrun.mock_tpm_model("thing"), mockrun.mock_model_factory())
         self.wsdir = tempfile.mkdtemp()
         self.engine.workspace_base = self.wsdir   # per-run dirs land here (don't touch $HOME)
 
     def tearDown(self):
-        self.bb.close()
         shutil.rmtree(self.wsdir, ignore_errors=True)
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
 
     def test_build_runs_full_cascade(self):
         self.engine.build_objective("thing")

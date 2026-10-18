@@ -1,28 +1,16 @@
 """M6: one work agent driven end-to-end through the context-manager (mock model)."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import Blackboard
 from pixibot.lib.context_manager import STATE_DONE, ContextManager
 from pixibot.lib.factory import make_agent
 from pixibot.model import MockModel, ModelResponse, ToolCall
 
+from .support import WithBlackboard
 
-class EndToEndTest(unittest.TestCase):
-    def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="e2e")
 
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
+class EndToEndTest(WithBlackboard, unittest.TestCase):
+    run_id = "e2e"
 
     def test_programmer_agent_end_to_end(self):
         model = MockModel([

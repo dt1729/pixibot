@@ -1,8 +1,6 @@
 """Unit tests for the Pixibot blackboard (stdlib only)."""
 
 import json
-import os
-import tempfile
 import unittest
 
 from pixibot.blackboard import (
@@ -12,20 +10,11 @@ from pixibot.blackboard import (
     ScopeError,
 )
 
+from .support import WithBlackboard
 
-class BlackboardTest(unittest.TestCase):
-    def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="t1")
 
-    def tearDown(self):
-        self.bb.close()
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + suffix)
-            except FileNotFoundError:
-                pass
+class BlackboardTest(WithBlackboard, unittest.TestCase):
+    run_id = "t1"
 
     def test_addressed_delivery_and_cursor(self):
         self.bb.register_agent("prog")

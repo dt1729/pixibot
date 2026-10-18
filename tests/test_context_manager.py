@@ -1,27 +1,19 @@
 """Unit tests for the context-manager scheduler (stdlib only, mock runners)."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import KIND_ARTIFACT, Blackboard
+from pixibot.blackboard import KIND_ARTIFACT
 from pixibot.lib.context_manager import STATE_BLOCKED, STATE_DONE, ContextManager
 
+from .support import WithBlackboard
 
-class ContextManagerTest(unittest.TestCase):
+
+class ContextManagerTest(WithBlackboard, unittest.TestCase):
+    run_id = "cm"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="cm")
+        super().setUp()
         self.cm = ContextManager(self.bb, max_steps=50)
-
-    def tearDown(self):
-        self.bb.close()
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + suffix)
-            except FileNotFoundError:
-                pass
 
     def test_single_agent_activates_and_writes(self):
         def runner(bb, me, events):

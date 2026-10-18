@@ -16,8 +16,8 @@ class _FakeFunc:
 
 
 class _FakeToolCall:
-    def __init__(self, id, name, arguments, index=0):
-        self.id = id
+    def __init__(self, call_id, name, arguments, index=0):
+        self.id = call_id
         self.type = "function"
         self.function = _FakeFunc(name, arguments)
         self.index = index

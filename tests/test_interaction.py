@@ -1,31 +1,23 @@
 """Tests for the Broker / spokesbot interaction layer."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import KIND_ARTIFACT, KIND_DIRECTIVE, Blackboard
+from pixibot.blackboard import KIND_ARTIFACT, KIND_DIRECTIVE
 from pixibot.interaction import Broker, snapshot
 from pixibot.model import MockModel, ModelResponse
 
+from .support import WithBlackboard
 
-class InteractionTest(unittest.TestCase):
+
+class InteractionTest(WithBlackboard, unittest.TestCase):
+    run_id = "ix"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="ix")
+        super().setUp()
         self.bb.register_agent("prog-f1", role="programmer", depth="senior",
                                scope="impl/f1", state="ACTIVE")
         self.bb.send("tpm", "implement f1", to="prog-f1")
         self.bb.send("prog-f1", "def f(): pass", kind=KIND_ARTIFACT, section="impl/f1")
-
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
 
     def test_snapshot_includes_identity_and_activity(self):
         snap = snapshot(self.bb, "prog-f1")

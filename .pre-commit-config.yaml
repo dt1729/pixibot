@@ -1,35 +1,43 @@
 # Mechanical gates, run before every commit. These are the same checks the
-# checkpoint gate runs on agent output (DESIGN.md §10): the harness is held to
-# the standard it enforces.
+# checkpoint gate runs on agent output (DESIGN.md §10): the harness is held to the
+# standard it enforces.
+#
+# Every hook is `language: system`, i.e. it runs the tool already installed in the
+# environment rather than a pinned copy pre-commit downloads. One toolchain, one
+# set of results - the same commands CI or a developer runs by hand.
+#
+# `ruff format` is deliberately NOT a hook. The codebase is hand-wrapped (aligned
+# continuations, prompt strings laid out to be read in a terminal) and the
+# formatter would rewrite 47 files to settle a question nobody asked. Line length
+# and the lint rules in pyproject.toml are the enforced part.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.1
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-        args: [--check]
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.9.0
-    hooks:
-      - id: mypy
-        additional_dependencies: [types-requests]
-        pass_filenames: false
-        args: [pixibot]
-
   - repo: local
     hooks:
+      - id: ruff
+        name: ruff (lint)
+        entry: ruff check --force-exclude
+        language: system
+        types: [python]
+        require_serial: false
+
+      - id: mypy
+        name: mypy --strict
+        entry: python3 -m mypy
+        args: [pixibot]
+        language: system
+        types: [python]
+        pass_filenames: false
+
       - id: import-linter
         name: import-linter (contract dependency directions)
         entry: lint-imports
         language: system
-        pass_filenames: false
         types: [python]
+        pass_filenames: false
 
       - id: pytest
         name: pytest
         entry: python3 -m pytest -q
         language: system
-        pass_filenames: false
         types: [python]
+        pass_filenames: false

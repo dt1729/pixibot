@@ -1,14 +1,13 @@
 """M7: full mock pipeline — input -> TPM -> MoA -> run -> Observer report."""
 
 import json
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import Blackboard
 from pixibot.model import MockModel, ModelResponse, ToolCall
 from pixibot.run import run_pipeline
 from pixibot.schema import ValidationFailed
+
+from .support import WithBlackboard
 
 
 def sample_input():
@@ -45,19 +44,8 @@ def mock_factory(spec):
     ])
 
 
-class PipelineTest(unittest.TestCase):
-    def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="pipe")
-
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
+class PipelineTest(WithBlackboard, unittest.TestCase):
+    run_id = "pipe"
 
     def test_full_mock_pipeline(self):
         tpm_model = MockModel([ModelResponse(text=projection_json())])

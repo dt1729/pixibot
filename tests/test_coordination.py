@@ -1,27 +1,19 @@
 """Tests for deterministic dependency-chain activation (set_deps)."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import KIND_ARTIFACT, Blackboard
+from pixibot.blackboard import KIND_ARTIFACT
 from pixibot.lib.context_manager import ContextManager
 
+from .support import WithBlackboard
 
-class CoordinationTest(unittest.TestCase):
+
+class CoordinationTest(WithBlackboard, unittest.TestCase):
+    run_id = "coord"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="coord")
+        super().setUp()
         self.cm = ContextManager(self.bb, max_steps=30)
-
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
 
     def _recorder(self, order):
         def make(name):

@@ -1,30 +1,19 @@
 """Tests for the ReasoningAgent tool loop (MockModel — no API needed)."""
 
 import json
-import os
 import shutil
 import tempfile
 import unittest
 
-from pixibot.blackboard import Blackboard
 from pixibot.lib.agent import AgentSpec, ReasoningAgent, RunContext
 from pixibot.model import MockModel, ModelResponse, ToolCall
 from pixibot.workspace import Workspace
 
+from .support import WithBlackboard
 
-class AgentTest(unittest.TestCase):
-    def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="ag")
 
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
+class AgentTest(WithBlackboard, unittest.TestCase):
+    run_id = "ag"
 
     def test_agent_uses_tool_then_finishes(self):
         model = MockModel([
@@ -199,8 +188,8 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(agent.workspace.read_file("a.py"), "x")  # tool actually ran
         mem = json.loads(self.bb.load_memory("dev"))
         for i, m in enumerate(mem):  # every tool_use is followed by a tool_result
-            if m.get("role") == "assistant" and isinstance(m["content"], list):
-                if any(b.get("type") == "tool_use" for b in m["content"]):
+            if (m.get("role") == "assistant" and isinstance(m["content"], list)
+                    and any(b.get("type") == "tool_use" for b in m["content"])):
                     nxt = mem[i + 1] if i + 1 < len(mem) else {}
                     got = nxt.get("content", [])
                     self.assertTrue(isinstance(got, list)

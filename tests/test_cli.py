@@ -1,13 +1,15 @@
 """Tests for the shell command router (bash-style nav + actions; fakes, no models)."""
 
-import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
-from pixibot.blackboard import KIND_ARTIFACT, Blackboard
+from pixibot.blackboard import KIND_ARTIFACT
 from pixibot.cli import ChatSession
 from pixibot.workspace import Workspace
+
+from .support import WithBlackboard
 
 
 class FakeBroker:
@@ -49,11 +51,11 @@ class FakeEngine:
         return 3
 
 
-class CliTest(unittest.TestCase):
+class CliTest(WithBlackboard, unittest.TestCase):
+    run_id = "cli"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="cli")
+        super().setUp()
         self.wsdir = tempfile.mkdtemp()
         self.ws = Workspace(self.wsdir)
         self.ws.write_file("reverse.py", "print('hi')")
@@ -63,13 +65,7 @@ class CliTest(unittest.TestCase):
         self.session = ChatSession(self.bb, self.broker, lambda objective, hard=False: self.engine, workspace=self.ws)
 
     def tearDown(self):
-        self.bb.close()
         shutil.rmtree(self.wsdir, ignore_errors=True)
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
 
     # ── navigation ──────────────────────────────────────────────────────────
     def test_ls(self):
@@ -111,9 +107,8 @@ class CliTest(unittest.TestCase):
                 "- Framework: none\n- Platform: linux\n## Acceptance criteria\n- works\n"
                 "## Constraints\n- none\n## Non-goals\n- none\n## Budget\n- Max depth: senior\n"
                 "- Compute: 100000\n- Scope: one\n## Hard development?\nno\n")
-        p = os.path.join(self.wsdir, "form.md")
-        with open(p, "w") as f:
-            f.write(form)
+        p = str(Path(self.wsdir) / "form.md")
+        Path(p).write_text(form, encoding="utf-8")
         out = self.session.handle(f"build-from {p}")
         self.assertEqual(self.engine.calls[-1][0], "build_from")
         self.assertIn("Built", out)

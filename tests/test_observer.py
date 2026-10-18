@@ -1,26 +1,14 @@
 """Tests for the Observer's DAG reconstruction and report."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import Blackboard
 from pixibot.observer import dag_edges, report
 
+from .support import WithBlackboard
 
-class ObserverTest(unittest.TestCase):
-    def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="obs")
 
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
+class ObserverTest(WithBlackboard, unittest.TestCase):
+    run_id = "obs"
 
     def test_dag_captures_messages_and_replies(self):
         self.bb.register_agent("a")

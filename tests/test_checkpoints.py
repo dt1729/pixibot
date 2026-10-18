@@ -6,16 +6,16 @@ key and no terminal are involved.
 """
 
 import contextlib
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from pixibot.blackboard import Blackboard
 from pixibot.checkpoints import HUMAN_GATE, Checkpoint, Review, due, parse
 from pixibot.engine import Engine
 from pixibot.lib import mockrun
+
+from .support import WithBlackboard
 
 
 class ParseTest(unittest.TestCase):
@@ -66,11 +66,11 @@ class DueTest(unittest.TestCase):
         self.assertEqual(len(due((Checkpoint("end", "demo"),), set())), 1)
 
 
-class ReviewLoopTest(unittest.TestCase):
+class ReviewLoopTest(WithBlackboard, unittest.TestCase):
+    run_id = "cp"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="cp")
+        super().setUp()
         self.engine = Engine(self.bb, mockrun.mock_tpm_model("thing"),
                              mockrun.mock_model_factory())
         self.wsdir = tempfile.mkdtemp()

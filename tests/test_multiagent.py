@@ -1,27 +1,19 @@
 """Tests for dependency-driven activation (handshakes) in the context-manager."""
 
-import os
-import tempfile
 import unittest
 
-from pixibot.blackboard import KIND_ARTIFACT, Blackboard
+from pixibot.blackboard import KIND_ARTIFACT
 from pixibot.lib.context_manager import ContextManager
 
+from .support import WithBlackboard
 
-class MultiAgentTest(unittest.TestCase):
+
+class MultiAgentTest(WithBlackboard, unittest.TestCase):
+    run_id = "ma"
+
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        self.bb = Blackboard(self.path, run_id="ma")
+        super().setUp()
         self.cm = ContextManager(self.bb, max_steps=30)
-
-    def tearDown(self):
-        self.bb.close()
-        for s in ("", "-wal", "-shm"):
-            try:
-                os.unlink(self.path + s)
-            except FileNotFoundError:
-                pass
 
     def test_write_to_section_activates_reader(self):
         def producer(bb, me, ev):
