@@ -33,8 +33,8 @@ class EndToEndTest(unittest.TestCase):
             ),
             ModelResponse(text="implemented f1", stop_reason="end_turn"),
         ])
-        agent = make_agent("prog-f1", role="programmer", depth="senior",
-                           model=model, scope="impl/f1")
+        agent = make_agent({"id": "prog-f1", "role": "programmer",
+                            "budget": {"depth": "senior", "scope": "impl/f1"}}, model)
         cm = ContextManager(self.bb, max_steps=20)
         cm.register(agent.agent_id, agent.runner,
                     role="programmer", depth="senior", scope="impl/f1")

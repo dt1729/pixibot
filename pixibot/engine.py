@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import gates, observer, orchestrator, tpm
+from .agent import RunContext
 from .blackboard import KIND_DIRECTIVE, Blackboard
 from .context_manager import ActivationHook, ContextManager, StartHook
 from .logbook import get as _get_logger
@@ -95,10 +96,10 @@ class Engine:
         self.cm.on_activation = self.on_activation
         self.cm.on_agent_start = self.on_agent_start
         objective = self.projection.get("plan_summary") or inp.get("objective", "")
-        orchestrator.materialize(
-            self.projection, self.bb, self.cm, self.model_factory, self.workspace,
-            self.on_event, objective,
-            continuous=("continuous_testing" in self.features))
+        run = RunContext(workspace=self.workspace, on_event=self.on_event,
+                         objective=objective)
+        orchestrator.materialize(self.projection, self.cm, self.model_factory, run,
+                                 continuous=("continuous_testing" in self.features))
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
 
@@ -161,8 +162,9 @@ class Engine:
         new = [s for s in self.projection["agents"] if not self.cm.is_registered(s["id"])]
         objective = self.projection.get("plan_summary", "")
         for spec in new:
-            orchestrator.register_one(spec, self.bb, self.cm, self.model_factory,
-                                      self._ensure_workspace(), self.on_event, objective)
+            run = RunContext(workspace=self._ensure_workspace(),
+                             on_event=self.on_event, objective=objective)
+            orchestrator.register_one(spec, self.cm, self.model_factory, run)
             # only depend on agents that already completed, so new agents can start
             self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm._done)
         for spec in new:

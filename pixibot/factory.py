@@ -9,10 +9,9 @@ contract is injected so the quality bar is always present.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
-from .agent import ReasoningAgent
+from .agent import AgentSpec, ReasoningAgent, RunContext
 from .model import Model
 from .standards import standards_contract
 
@@ -155,6 +154,7 @@ _WORKFLOW = (
 
 
 def build_system_prompt(role: str, depth: str) -> str:
+    """The system prompt for a role at a depth, plus workflow and standards."""
     return "\n\n".join(p for p in (
         f"You are the '{role}' agent (depth: {depth}) on a Pixibot engineering team "
         "building software collaboratively.",
@@ -165,11 +165,30 @@ def build_system_prompt(role: str, depth: str) -> str:
     ) if p)
 
 
-def make_agent(agent_id: str, *, role: str, depth: str, model: Model,
-               scope: str | None = None, reads: Iterable[str] = (),
-               **kwargs: Any) -> ReasoningAgent:
-    return ReasoningAgent(
-        agent_id, model,
+def agent_spec(spec: dict[str, Any], model: Model, *,
+               read_denylist: tuple[str, ...] = ()) -> AgentSpec:
+    """Turn one projection agent-spec into an AgentSpec (DESIGN.md §5/§7).
+
+    The projection is the TPM's output, so the shapes it may omit are handled
+    here rather than at every call site: a missing role is a `specialist`, a
+    missing depth is `senior`.
+    """
+    budget = spec.get("budget", {})
+    depth = budget.get("depth", "senior")
+    role = spec.get("role", "specialist")
+    return AgentSpec(
+        agent_id=spec["id"],
+        model=model,
         system_prompt=build_system_prompt(role, depth),
-        role=role, depth=depth, scope=scope, reads=tuple(reads), **kwargs,
+        role=role,
+        depth=depth,
+        scope=budget.get("scope"),
+        reads=tuple(spec.get("blackboard", {}).get("reads", ())),
+        read_denylist=read_denylist,
     )
+
+
+def make_agent(spec: dict[str, Any], model: Model, run: RunContext | None = None, *,
+               read_denylist: tuple[str, ...] = ()) -> ReasoningAgent:
+    """One projection agent-spec + a model -> a live agent in this run."""
+    return ReasoningAgent(agent_spec(spec, model, read_denylist=read_denylist), run)

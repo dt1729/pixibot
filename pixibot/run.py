@@ -38,7 +38,7 @@ def run_pipeline(
         raise ValidationFailed(errors)
     projection = tpm.plan(inp, tpm_model)
     cm = ContextManager(bb, max_steps=max_steps)
-    orchestrator.materialize(projection, bb, cm, model_factory)
+    orchestrator.materialize(projection, cm, model_factory)
     orchestrator.kick(bb, projection)
     steps = cm.run()
     return {"projection": projection, "steps": steps, "report": observer.report(bb)}

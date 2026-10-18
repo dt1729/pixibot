@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 
-from pixibot.agent import ReasoningAgent
+from pixibot.agent import AgentSpec, ReasoningAgent, RunContext
 from pixibot.blackboard import Blackboard
 from pixibot.model import MockModel, ModelResponse, ToolCall
 from pixibot.workspace import Workspace
@@ -35,7 +35,7 @@ class AgentTest(unittest.TestCase):
             ),
             ModelResponse(text="done", stop_reason="end_turn"),
         ])
-        agent = ReasoningAgent("prog", model, scope="impl", system_prompt="you code")
+        agent = ReasoningAgent(AgentSpec("prog", model, scope="impl", system_prompt="you code"))
         self.bb.register_agent("prog", scope="impl")
         self.bb.send("user", "build f", to="prog")
         events = self.bb.poll_inbox("prog")
@@ -54,7 +54,7 @@ class AgentTest(unittest.TestCase):
         self.bb.register_agent("topo")
         self.bb.send("topo", "microservices", kind="artifact", section="topology")
 
-        agent = ReasoningAgent("prog", MockModel([capture]), reads=("topology",))
+        agent = ReasoningAgent(AgentSpec("prog", MockModel([capture]), reads=("topology",)))
         self.bb.register_agent("prog", scope="impl")
         self.bb.send("user", "go", to="prog")
         agent.runner(self.bb, "prog", self.bb.poll_inbox("prog"))
@@ -74,7 +74,8 @@ class AgentTest(unittest.TestCase):
                 stop_reason="tool_use"),
             ModelResponse(text="done", stop_reason="end_turn"),
         ])
-        agent = ReasoningAgent("dev", model, role="programmer", workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("dev", model, role="programmer"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.register_agent("dev")
         self.bb.send("user", "build an app", to="dev")
         agent.runner(self.bb, "dev", self.bb.poll_inbox("dev"))
@@ -85,7 +86,8 @@ class AgentTest(unittest.TestCase):
         root = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, root, True)
         model = MockModel([ModelResponse(text="looks fine", stop_reason="end_turn")])
-        agent = ReasoningAgent("rev", model, role="reviewer", workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("rev", model, role="reviewer"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.register_agent("rev")
         self.bb.send("user", "review", to="rev")
         agent.runner(self.bb, "rev", self.bb.poll_inbox("rev"))  # must not raise/hang
@@ -97,8 +99,8 @@ class AgentTest(unittest.TestCase):
         model = MockModel([
             ModelResponse(text="ok", thinking="I will implement f first", stop_reason="end_turn"),
         ])
-        agent = ReasoningAgent("a", model,
-                               on_event=lambda aid, k, d: seen.append((k, d)))
+        agent = ReasoningAgent(AgentSpec("a", model),
+                               RunContext(on_event=lambda aid, k, d: seen.append((k, d))))
         self.bb.register_agent("a")
         self.bb.send("user", "x", to="a")
         agent.runner(self.bb, "a", self.bb.poll_inbox("a"))
@@ -112,7 +114,7 @@ class AgentTest(unittest.TestCase):
         from pixibot.interaction import latest_reports
         model = MockModel([
             ModelResponse(text="12 passed, 2 SKIPPED (ffmpeg missing).", stop_reason="end_turn")])
-        agent = ReasoningAgent("tester", model, role="reviewer")  # non-producer: no nudge
+        agent = ReasoningAgent(AgentSpec("tester", model, role="reviewer"))  # non-producer
         self.bb.register_agent("tester")
         self.bb.send("user", "validate", to="tester")
         agent.runner(self.bb, "tester", self.bb.poll_inbox("tester"))
@@ -134,8 +136,8 @@ class AgentTest(unittest.TestCase):
             calls["n"] += 1
             return ModelResponse(text="design still stands; here's why", stop_reason="end_turn")
 
-        agent = ReasoningAgent("architect", MockModel([gen, gen]),
-                               role="topology", workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("architect", MockModel([gen, gen]), role="topology"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.send("tester", "reconsider the decode path", to="architect")
         agent.runner(self.bb, "architect", self.bb.poll_inbox("architect"))
         self.assertEqual(calls["n"], 1)  # one turn only — no forced delivery loop
@@ -150,8 +152,8 @@ class AgentTest(unittest.TestCase):
             seen["len"] = len(messages)
             return ModelResponse(text="ok", stop_reason="end_turn")
 
-        agent = ReasoningAgent("arch", MockModel([cap, cap]), role="reviewer",
-                               objective="Build a PyQt video viewer")
+        agent = ReasoningAgent(AgentSpec("arch", MockModel([cap, cap]), role="reviewer"),
+                               RunContext(objective="Build a PyQt video viewer"))
         self.bb.register_agent("arch")
 
         self.bb.send("user", "begin", to="arch")
@@ -170,7 +172,7 @@ class AgentTest(unittest.TestCase):
         """A turn with no text and no tool call must not persist an empty text block
         (the API rejects empty text blocks — the crash that BLOCKED live agents)."""
         model = MockModel([ModelResponse(text="", stop_reason="end_turn")])
-        agent = ReasoningAgent("a", model, role="reviewer")
+        agent = ReasoningAgent(AgentSpec("a", model, role="reviewer"))
         self.bb.register_agent("a")
         self.bb.send("user", "x", to="a")
         agent.runner(self.bb, "a", self.bb.poll_inbox("a"))  # must not raise
@@ -189,7 +191,8 @@ class AgentTest(unittest.TestCase):
         model = MockModel([ModelResponse(
             tool_calls=[ToolCall("t1", "write_artifact", {"section": "a.py", "content": "x"})],
             stop_reason="max_tokens")])
-        agent = ReasoningAgent("dev", model, role="reviewer", workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("dev", model, role="reviewer"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.register_agent("dev")
         self.bb.send("user", "go", to="dev")
         agent.runner(self.bb, "dev", self.bb.poll_inbox("dev"))
@@ -218,7 +221,8 @@ class AgentTest(unittest.TestCase):
                           stop_reason="tool_use"),
             ModelResponse(text="done", stop_reason="end_turn"),
         ])
-        agent = ReasoningAgent("ui", model, role="programmer", workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("ui", model, role="programmer"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.register_agent("ui")
         self.bb.send("user", "build the ui", to="ui")
         agent.runner(self.bb, "ui", self.bb.poll_inbox("ui"))
@@ -235,8 +239,8 @@ class AgentTest(unittest.TestCase):
             return ModelResponse(tool_calls=[ToolCall("t", "write_artifact", {"section": "a.py"})],
                                  stop_reason="max_tokens")
 
-        agent = ReasoningAgent("ui", MockModel([gen] * 40), role="reviewer",
-                               workspace=Workspace(root))
+        agent = ReasoningAgent(AgentSpec("ui", MockModel([gen] * 40), role="reviewer"),
+                               RunContext(workspace=Workspace(root)))
         self.bb.register_agent("ui")
         self.bb.send("user", "go", to="ui")
         agent.runner(self.bb, "ui", self.bb.poll_inbox("ui"))
@@ -247,7 +251,7 @@ class AgentTest(unittest.TestCase):
             ModelResponse(tool_calls=[ToolCall("t1", "nope", {})], stop_reason="tool_use"),
             ModelResponse(text="recovered", stop_reason="end_turn"),
         ])
-        agent = ReasoningAgent("a", model)
+        agent = ReasoningAgent(AgentSpec("a", model))
         self.bb.register_agent("a")
         self.bb.send("user", "x", to="a")
         # should not raise

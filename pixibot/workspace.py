@@ -57,11 +57,11 @@ class Workspace:
                 except OSError:
                     pass
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> dict[str, float]:
         """path -> mtime for every file (for detecting what an agent changed)."""
         return {p: os.path.getmtime(self._safe(p)) for p in self.list_files()}
 
-    def changed_since(self, before: dict) -> list[str]:
+    def changed_since(self, before: dict[str, float] | None) -> list[str]:
         """Files created or modified since a snapshot (list_files already drops
         caches/venvs/pytest tmp dirs)."""
         out = []
@@ -84,7 +84,7 @@ class Workspace:
             f.write(content)
         return path
 
-    def read_file(self, path: str):
+    def read_file(self, path: str) -> str | None:
         full = self._safe(path)
         if not os.path.isfile(full):
             return None
@@ -109,7 +109,7 @@ class Workspace:
     def isdir(self, path: str = "") -> bool:
         return os.path.isdir(self._safe(path))
 
-    def listdir(self, path: str = ""):
+    def listdir(self, path: str = "") -> list[str] | None:
         """Entries in a directory (dirs get a trailing '/'), or None if not a dir."""
         full = self._safe(path)
         if not os.path.isdir(full):
@@ -119,7 +119,7 @@ class Workspace:
             entries.append(name + ("/" if os.path.isdir(os.path.join(full, name)) else ""))
         return entries
 
-    def _clean_env(self) -> dict:
+    def _clean_env(self) -> dict[str, str]:
         """Child environment with secrets removed and HOME/TMP pinned to the
         workspace, so `~`/`$HOME`/temp all resolve inside the project."""
         env = {k: v for k, v in os.environ.items()
@@ -130,7 +130,7 @@ class Workspace:
         return env
 
     @staticmethod
-    def _escape_reason(command: str):
+    def _escape_reason(command: str) -> str | None:
         for pat in _ESCAPE_PATTERNS:
             if pat.search(command):
                 return ("refused: this command tries to leave your workspace. You are "
@@ -138,7 +138,7 @@ class Workspace:
                         "(relative paths). Do not read other projects or system files.")
         return None
 
-    def run(self, command: str, timeout: int = 120):
+    def run(self, command: str, timeout: int = 120) -> tuple[int, str]:
         """Run a shell command confined to the workspace. Returns (rc, output).
 
         The command runs with cwd + HOME + TMPDIR pinned to the workspace root and
