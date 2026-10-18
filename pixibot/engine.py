@@ -18,9 +18,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import gates, observer, orchestrator, tpm
+from . import checkpoints, gates, observer, orchestrator, tpm
 from .agent import EventHook, RunContext
-from .blackboard import KIND_DIRECTIVE, Blackboard
+from .blackboard import KIND_CONTROL, KIND_DIRECTIVE, Blackboard
+from .checkpoints import Checkpoint, Reviewer
 from .context_manager import ActivationHook, ContextManager, StartHook
 from .gates import GateReport
 from .logbook import get as _get_logger
@@ -40,6 +41,9 @@ ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
 DEFAULT_FEATURES = frozenset({"continuous_testing"})
 
 DEFAULT_WORKSPACE_BASE = "~/pixibot-workspace"
+#: How many times one checkpoint may send the run back for revision before the
+#: engine stops asking. A person can always `revise` again by hand afterwards.
+DEFAULT_REVIEW_ROUNDS = 3
 
 
 def default_input(objective: str, *, hard: bool = False) -> dict[str, Any]:
@@ -75,6 +79,8 @@ class Engine:
         self.sandbox = "auto"      # container when docker answers, else confined host
         self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
+        self.max_review_rounds = DEFAULT_REVIEW_ROUNDS  # per checkpoint (§10)
+        self.passed_checkpoints: list[str] = []         # ids a human has accepted
         self.last_gate: GateReport | None = None   # the most recent gate run
 
     # -- workspace -----------------------------------------------------------
@@ -90,8 +96,15 @@ class Engine:
         return self.workspace
 
     # -- build ---------------------------------------------------------------
-    def build(self, inp: dict[str, Any]) -> dict[str, Any]:
-        """Plan a team for `inp`, run it to quiescence, and report what happened."""
+    def build(self, inp: dict[str, Any], *,
+              reviewer: Reviewer | None = None) -> dict[str, Any]:
+        """Plan a team for `inp`, run it to quiescence, and report what happened.
+
+        With a `reviewer`, each declared checkpoint is gated mechanically and then
+        shown to that reviewer, whose verdict either ends the run or sends it back
+        for revision (DESIGN.md §10, decision 12). Without one, the build returns
+        as soon as the team quiesces — the unattended path.
+        """
         # Isolate this build: a fresh run_id (no stale agents/events from prior
         # builds) and its own workspace dir, so an accidental rebuild can never
         # wipe an earlier run's work. Old runs stay on disk for recovery.
@@ -115,8 +128,11 @@ class Engine:
         orchestrator.kick(self.bb, self.projection)
         steps = self.cm.run()
 
+        self.passed_checkpoints = []
         gate: GateReport | None = None
-        if "auto_gate" in self.features:
+        if reviewer is not None:
+            steps, gate = self._review_loop(run_id, steps, reviewer)
+        elif "auto_gate" in self.features:
             steps, gate = self._gate_loop(run_id, steps)
 
         _log.info("BUILD done run=%s steps=%d files=%d gate=%s",
@@ -128,8 +144,9 @@ class Engine:
             res["gate_passed"], res["gate"] = gate.passed, gate
         return res
 
-    def build_objective(self, objective: str, *, hard: bool = False) -> dict[str, Any]:
-        return self.build(default_input(objective, hard=hard))
+    def build_objective(self, objective: str, *, hard: bool = False,
+                        reviewer: Reviewer | None = None) -> dict[str, Any]:
+        return self.build(default_input(objective, hard=hard), reviewer=reviewer)
 
     # -- the mechanical gate (adoption E) ------------------------------------
     def gate(self) -> GateReport:
@@ -158,6 +175,49 @@ class Engine:
                 return steps, report
             steps += self.revise("mechanical gate failed — fix these:\n" + report.summary())
             report = self.gate()
+        return steps, report
+
+    # -- the human gate (§10: mechanical first, demo second) -----------------
+    def pending_checkpoints(self) -> tuple[Checkpoint, ...]:
+        """Declared checkpoints whose agents have finished and that nobody has passed."""
+        if not self.projection or not self.cm:
+            return ()
+        return checkpoints.due(checkpoints.parse(self.projection), self.cm.completed(),
+                               already_passed=self.passed_checkpoints)
+
+    def _review_loop(self, run_id: str, steps: int,
+                     reviewer: Reviewer) -> tuple[int, GateReport | None]:
+        """Gate, demo, and act on the verdict, for each due checkpoint in turn."""
+        report: GateReport | None = None
+        for cp in self.pending_checkpoints():
+            if not cp.human:
+                continue   # a mechanical-only checkpoint is the gate loop's business
+            for round_no in range(self.max_review_rounds + 1):
+                report = self.gate()
+                _log.info("CHECKPOINT run=%s cp=%s round=%d gate=%s", run_id, cp.id,
+                          round_no, report.passed if report.applicable else "n/a")
+                if report.applicable and not report.passed:
+                    # A red suite never reaches a person (decision 33): send the
+                    # failures back to the team instead, while rounds remain.
+                    if round_no == self.max_review_rounds:
+                        break
+                    steps += self.revise("mechanical gate failed — fix these:" + chr(10)
+                                         + report.summary())
+                    continue
+                review = reviewer(cp, report.summary() if report.applicable
+                                  else "no mechanical checks apply")
+                self.bb.send("user", f"[checkpoint {cp.id}] "
+                             + ("accepted" if review.accepted else f"revise: {review.feedback}"),
+                             kind=KIND_CONTROL)
+                if review.accepted:
+                    self.passed_checkpoints.append(cp.id)
+                    _log.info("CHECKPOINT run=%s cp=%s accepted", run_id, cp.id)
+                    break
+                if round_no == self.max_review_rounds:
+                    _log.warning("CHECKPOINT run=%s cp=%s out of review rounds",
+                                 run_id, cp.id)
+                    break
+                steps += self.revise(review.feedback)
         return steps, report
 
     # -- steer ---------------------------------------------------------------

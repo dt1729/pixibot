@@ -23,6 +23,7 @@ from typing import ClassVar, Protocol
 
 from . import console, intake, logbook, observer, providers
 from .blackboard import KIND_CONTROL, Blackboard
+from .checkpoints import Checkpoint, Review
 from .engine import Engine
 from .interaction import Broker, latest_reports
 from .providers import Provider
@@ -97,6 +98,7 @@ class ChatSession:
         self.progress_start: Callable[[str], None] | None = None
         self.on_event: Callable[[str, str, str], None] | None = None
         self.on_build_start: Callable[[str], None] | None = None
+        self.reviewer: Callable[[Checkpoint, str], Review] | None = None
         self.provider_name = provider_name
         self.sandbox = "auto"        # passed to each engine this session builds
 
@@ -266,7 +268,7 @@ class ChatSession:
         if not rest.strip():
             return "usage: build <what to build>"
         engine = self._start_engine(rest)
-        res = engine.build_objective(rest, hard=self.hard)
+        res = engine.build_objective(rest, hard=self.hard, reviewer=self.reviewer)
         self.workspace = engine.workspace   # adopt this build's isolated workspace
         return self._built_msg(res)
 
@@ -284,7 +286,7 @@ class ChatSession:
             return "the form is missing/invalid:\n- " + "\n- ".join(errs)
         self.hard = self.hard or bool(inp.get("hard"))
         engine = self._start_engine(inp.get("objective", "build"))
-        res = engine.build(inp)
+        res = engine.build(inp, reviewer=self.reviewer)
         self.workspace = engine.workspace
         return self._built_msg(res)
 
@@ -378,6 +380,30 @@ def wire(bb: Blackboard, provider: Provider) -> tuple[Broker, EngineFactory]:
     return Broker(bb, provider.spokesbot), make_engine
 
 
+ACCEPTS = ("", "ok", "y", "yes", "accept", "accepted", "ship", "done", "lgtm")
+
+
+def ask_at_checkpoint(checkpoint: Checkpoint, gate_summary: str) -> Review:
+    """Show the demo and read the verdict — the human half of the gate (§10).
+
+    Blocking, deliberately: this is the one moment a build is meant to wait. An
+    empty line accepts; anything else is feedback and the team re-plans with it.
+    """
+    console.write(console.c(f"{chr(10)}── checkpoint {checkpoint.id} "
+                            f"────────────────────────{chr(10)}", "bold", "magenta"))
+    console.write(f"demo: {checkpoint.demo}{chr(10)}")
+    console.write(console.c(f"gate: {gate_summary}{chr(10)}", "dim"))
+    try:
+        answer = input(console.c("accept? [Enter to accept, or type what to change] ",
+                                 "bold")).strip()
+    except (EOFError, KeyboardInterrupt):
+        console.write(chr(10))
+        return Review.accept()   # a closed stdin is not a request for changes
+    if answer.lower() in ACCEPTS:
+        return Review.accept()
+    return Review.revise(answer)
+
+
 def _planning_line(objective: str) -> None:  # noqa: ARG001 - the title is the TUI's job
     console.write(console.c("  … planning the team (TPM)" + chr(10), "dim"))
 
@@ -409,6 +435,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--tui", action="store_true", help="force the split-pane TUI")
     ap.add_argument("--plain", action="store_true", help="force the plain shell (no TUI)")
     ap.add_argument("--log", help="path to the run log (default ~/.pixibot/pixibot.log)")
+    ap.add_argument("--review", action="store_true",
+                    help="pause at each checkpoint for a demo and your verdict (§10)")
     return ap.parse_args(argv)
 
 
@@ -437,6 +465,10 @@ def _build_session(args: argparse.Namespace, bb: Blackboard) -> tuple[ChatSessio
         session.progress = _progress
         session.progress_start = _progress_start
         session.on_build_start = _planning_line
+    if args.review and sys.stdin.isatty():
+        # The checkpoint pause needs a person at a terminal; piped input would
+        # answer every demo with EOF.
+        session.reviewer = ask_at_checkpoint
     return session, provider
 
 

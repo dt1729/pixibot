@@ -32,11 +32,11 @@ class FakeEngine:
         self.sandbox = "auto"
         self.workspace = None
 
-    def build_objective(self, objective, *, hard=False):
+    def build_objective(self, objective, *, hard=False, reviewer=None):
         self.calls.append(("build", objective, hard))
         return {"steps": 1, "projection": {"agents": [{"id": "a"}]}}
 
-    def build(self, inp):
+    def build(self, inp, *, reviewer=None):
         self.calls.append(("build_from", inp.get("objective")))
         return {"steps": 1}
 

@@ -60,9 +60,11 @@ def revised_projection(objective: str = "the requested feature") -> dict[str, An
 
 def mock_tpm_model(objective: str = "the requested feature") -> MockModel:
     # First generate -> build projection; second -> revised projection.
+    revised = ModelResponse(text=json.dumps(revised_projection(objective)))
     return MockModel([
         ModelResponse(text=json.dumps(build_projection(objective))),
-        ModelResponse(text=json.dumps(revised_projection(objective))),
+        # repeated so a review loop can revise several times without running dry
+        *([revised] * 6),
     ])
 
 
