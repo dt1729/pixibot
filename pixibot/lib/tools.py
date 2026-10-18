@@ -10,14 +10,14 @@ Each implementation is a module-level function of ``(agent, blackboard, input)``
 returning the text the model will read — including refusals, which are written to
 be acted on rather than merely reported.
 
-Contract: docs/contracts/pixibot.tools.md
+Contract: docs/contracts/pixibot.lib.tools.md
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .blackboard import KIND_ARTIFACT, KIND_CONTROL, Blackboard
+from ..blackboard import KIND_ARTIFACT, KIND_CONTROL, Blackboard
 
 if TYPE_CHECKING:
     from .agent import ReasoningAgent, ToolImpl

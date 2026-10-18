@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import unittest
 
-from pixibot.tools import default_tool_impls
+from pixibot.lib.tools import default_tool_impls
 from pixibot.workspace import Workspace
 
 

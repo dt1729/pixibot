@@ -5,7 +5,7 @@ function of the command table, the workspace tree and the live agent ids. Out
 here it is testable without a terminal (or without ``textual`` installed at all),
 which is how the CLI's completion acquired tests at all.
 
-Contract: docs/contracts/pixibot.completion.md
+Contract: docs/contracts/pixibot.lib.completion.md
 """
 
 from __future__ import annotations

@@ -70,7 +70,7 @@ injected object.
 
 ## Dependencies
 
-- **May import:** `pixibot.logbook`, stdlib (`subprocess`, `shutil`, `pathlib`)
+- **May import:** `pixibot.lib.logbook`, stdlib (`subprocess`, `shutil`, `pathlib`)
 - **Must not import:** any other `pixibot` module — this is the bottom of the stack
 - **Imported by:** `pixibot.workspace`, `pixibot.gates`, `pixibot.engine`
 
@@ -91,7 +91,7 @@ A failing or timed-out command is **not** an error: it is an `ExecResult` with a
 - **WARNING** when `executor_for("auto")` finds no daemon and falls back to the host:
   the run is less isolated than the design promises, and the operator should know once.
 - **No INFO per command.** The agent loop already logs every tool call with its result
-  (`pixibot.agent`), so a line here would double every entry.
+  (`pixibot.lib.agent`), so a line here would double every entry.
 - Never logged: the command's output (it can contain the whole project), and the
   environment — neither variable names nor values.
 

@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
-from .model import Model
-from .schema import obtain_valid, validate_projection
+from ..model import Model
+from ..schema import obtain_valid, validate_projection
 
 TPM_SYSTEM = (
     "You are the TPM planning agent for Pixibot, which builds real software with a team "

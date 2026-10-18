@@ -45,7 +45,7 @@ The seam is `ChatSession` plus its four hooks (`on_build_start`, `progress_start
 `progress`, `on_event`). That is the whole coupling, and it is one-directional: the TUI
 imports the session, never the reverse.
 
-Completion is **not** implemented here — it is `pixibot.completion`, called with lookups
+Completion is **not** implemented here — it is `pixibot.lib.completion`, called with lookups
 pointing at this session. Nothing in this module is a seam for anyone else: it is a leaf.
 
 Rejected: letting the TUI build the engine itself (what it used to do). It duplicated
@@ -55,8 +55,8 @@ green.
 
 ## Dependencies
 
-- **May import:** `pixibot.cli`, `pixibot.completion`, `pixibot.logbook`, `textual`
-- **Must not import:** `pixibot.engine`, `pixibot.orchestrator`, `pixibot.intake`,
+- **May import:** `pixibot.cli`, `pixibot.lib.completion`, `pixibot.lib.logbook`, `textual`
+- **Must not import:** `pixibot.engine`, `pixibot.lib.orchestrator`, `pixibot.intake`,
   `pixibot.schema` — the session owns all of that
 - **Imported by:** `pixibot.cli` (lazily, inside `main`)
 

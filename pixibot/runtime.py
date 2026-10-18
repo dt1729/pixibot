@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from .logbook import get as _get_logger
+from .lib.logbook import get as _get_logger
 
 _log = _get_logger("runtime")
 

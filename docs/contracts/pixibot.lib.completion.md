@@ -1,4 +1,4 @@
-# Contract: pixibot.completion
+# Contract: pixibot.lib.completion
 
 **Status:** accepted
 **Depth:** senior

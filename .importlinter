@@ -1,0 +1,102 @@
+# The mechanical half of every contract's "Must not import" line
+# (docs/contracts/*.md). Run: lint-imports
+#
+# These are the dependency directions the design depends on. A violation is not a
+# style question: it means a module learned about something it is supposed to be
+# independent of, which is how a seam stops being a seam.
+
+[importlinter]
+root_package = pixibot
+include_external_packages = False
+
+[importlinter:contract:internals-stay-below]
+name = Internals never reach the orchestration or front-end layer
+type = forbidden
+source_modules =
+    pixibot.lib
+forbidden_modules =
+    pixibot.cli
+    pixibot.tui
+    pixibot.engine
+    pixibot.run
+    pixibot.benchmark
+    pixibot.demo
+    pixibot.providers
+
+[importlinter:contract:nothing-imports-a-front-end]
+name = Nothing below the shell imports a front end
+type = forbidden
+source_modules =
+    pixibot.engine
+    pixibot.providers
+    pixibot.gates
+    pixibot.runtime
+    pixibot.workspace
+    pixibot.blackboard
+    pixibot.model
+    pixibot.checkpoints
+    pixibot.schema
+    pixibot.observer
+    pixibot.interaction
+    pixibot.intake
+    pixibot.benchmark
+forbidden_modules =
+    pixibot.cli
+    pixibot.tui
+
+[importlinter:contract:runtime-is-the-bottom]
+name = The execution runtime depends on nothing but the log
+type = forbidden
+source_modules =
+    pixibot.runtime
+forbidden_modules =
+    pixibot.workspace
+    pixibot.gates
+    pixibot.engine
+    pixibot.blackboard
+    pixibot.model
+
+[importlinter:contract:a-gate-does-not-know-who-asked]
+name = The gate and the checkpoints do not know who asked
+type = forbidden
+source_modules =
+    pixibot.gates
+    pixibot.checkpoints
+forbidden_modules =
+    pixibot.engine
+    pixibot.lib.agent
+    pixibot.cli
+
+[importlinter:contract:provider-choice-is-independent-of-the-run]
+name = Provider choice does not know what a run does with the models
+type = forbidden
+source_modules =
+    pixibot.providers
+forbidden_modules =
+    pixibot.engine
+    pixibot.run
+    pixibot.cli
+    pixibot.tui
+
+[importlinter:contract:an-agent-does-not-know-its-scheduler]
+name = An agent does not know who scheduled it or which provider built its model
+type = forbidden
+source_modules =
+    pixibot.lib.agent
+    pixibot.lib.tools
+forbidden_modules =
+    pixibot.lib.orchestrator
+    pixibot.engine
+    pixibot.providers
+    pixibot.cli
+
+[importlinter:contract:completion-is-handed-its-lookups]
+name = Completion is handed its lookups rather than finding them
+type = forbidden
+source_modules =
+    pixibot.lib.completion
+forbidden_modules =
+    pixibot.tui
+    pixibot.cli
+    pixibot.workspace
+    pixibot.blackboard

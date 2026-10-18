@@ -12,7 +12,7 @@ tools, and writes results back to the blackboard.
 
 Its ``runner`` method plugs directly into ``ContextManager``.
 
-Contract: docs/contracts/pixibot.agent.md
+Contract: docs/contracts/pixibot.lib.agent.md
 """
 
 from __future__ import annotations
@@ -22,14 +22,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
+from ..blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
+from ..model import Model, ModelResponse, ToolCall
 from .context_manager import STATE_DONE
 from .logbook import get as _get_logger
-from .model import Model, ModelResponse, ToolCall
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
 
 if TYPE_CHECKING:  # avoids an import cycle at runtime (tools -> agent attributes)
-    from .workspace import Workspace
+    from ..workspace import Workspace
 
 _log = _get_logger("agent")
 

@@ -2,7 +2,7 @@
 
 import unittest
 
-from pixibot import console
+from pixibot.lib import console
 
 
 class ConsoleTest(unittest.TestCase):

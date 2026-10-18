@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .logbook import get as _get_logger
+from .lib.logbook import get as _get_logger
 
 #: One message in Anthropic content-block shape - the wire format Pixibot speaks
 #: internally, translated on the way out for OpenAI-compatible endpoints.

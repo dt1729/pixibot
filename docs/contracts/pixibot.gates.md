@@ -69,7 +69,7 @@ heuristic, and C/C++ projects were silently ungated.
 ## Dependencies
 
 - **May import:** `pixibot.runtime`, stdlib (`pathlib`, `re`)
-- **Must not import:** `pixibot.engine`, `pixibot.agent`, `pixibot.cli` — a gate must not
+- **Must not import:** `pixibot.engine`, `pixibot.lib.agent`, `pixibot.cli` — a gate must not
   know who asked
 - **Imported by:** `pixibot.engine`
 

@@ -1,4 +1,4 @@
-# Contract: pixibot.orchestrator
+# Contract: pixibot.lib.orchestrator
 
 **Status:** accepted
 **Depth:** senior
@@ -54,7 +54,7 @@ where an experiment is configured.
 
 ## Dependencies
 
-- **May import:** `pixibot.agent`, `pixibot.factory`, `pixibot.context_manager`,
+- **May import:** `pixibot.lib.agent`, `pixibot.lib.factory`, `pixibot.lib.context_manager`,
   `pixibot.blackboard`, `pixibot.model`, stdlib
 - **Must not import:** `pixibot.engine`, `pixibot.cli`, `pixibot.providers` — it is handed
   a factory, it does not choose one

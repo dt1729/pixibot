@@ -60,8 +60,8 @@ that are allowed, and inheriting `Path` would hand callers every operation that 
 ## Dependencies
 
 - **May import:** `pixibot.runtime`, stdlib (`pathlib`, `re`, `shutil`, `contextlib`)
-- **Must not import:** `pixibot.agent`, `pixibot.engine`, `pixibot.blackboard`
-- **Imported by:** `pixibot.agent` (tool impls), `pixibot.engine`, `pixibot.cli`,
+- **Must not import:** `pixibot.lib.agent`, `pixibot.engine`, `pixibot.blackboard`
+- **Imported by:** `pixibot.lib.agent` (tool impls), `pixibot.engine`, `pixibot.cli`,
   `pixibot.tui`
 
 ## Errors

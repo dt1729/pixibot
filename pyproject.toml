@@ -26,7 +26,8 @@ dependencies = [
 compat = ["openai>=1.40"]
 # The split-pane TUI; the plain shell works without it.
 tui = ["textual>=0.80"]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.9", "pre-commit>=3.7"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.9", "pre-commit>=3.7",
+       "import-linter>=2.0"]
 
 [project.scripts]
 pixibot = "pixibot.cli:main"

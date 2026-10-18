@@ -1,13 +1,13 @@
 """Orchestrator: materialize a projection into a live MoA (DESIGN.md §5).
 
 Each projection agent-spec becomes a ReasoningAgent sharing one
-:class:`~pixibot.agent.RunContext` (the workspace, the objective, the activity
+:class:`~pixibot.lib.agent.RunContext` (the workspace, the objective, the activity
 feed). Coordination is **deterministic**: an agent runs only after the agents it
 depends on have completed. Dependencies come from the projection's explicit
 ``depends_on`` if present, otherwise from a role-ordered chain — so every agent
 reliably participates even when the model's plan is loose.
 
-Contract: docs/contracts/pixibot.orchestrator.md
+Contract: docs/contracts/pixibot.lib.orchestrator.md
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ import dataclasses
 from collections.abc import Callable
 from typing import Any
 
+from ..blackboard import Blackboard
+from ..model import Model
 from .agent import ReasoningAgent, RunContext
-from .blackboard import Blackboard
 from .context_manager import ContextManager
 from .factory import make_agent
-from .model import Model
 
 ModelFactory = Callable[[dict[str, Any]], Model]
 Projection = dict[str, Any]

@@ -17,9 +17,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from . import observer, orchestrator, tpm
+from . import observer
 from .blackboard import Blackboard
-from .context_manager import ContextManager
+from .lib import orchestrator, tpm
+from .lib.context_manager import ContextManager
 from .model import Model
 from .schema import ValidationFailed, validate_input
 

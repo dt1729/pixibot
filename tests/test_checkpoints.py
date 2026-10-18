@@ -12,10 +12,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pixibot import mockrun
 from pixibot.blackboard import Blackboard
 from pixibot.checkpoints import HUMAN_GATE, Checkpoint, Review, due, parse
 from pixibot.engine import Engine
+from pixibot.lib import mockrun
 
 
 class ParseTest(unittest.TestCase):

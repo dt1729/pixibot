@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 from pixibot.blackboard import Blackboard
-from pixibot.context_manager import STATE_DONE, ContextManager
-from pixibot.factory import make_agent
+from pixibot.lib.context_manager import STATE_DONE, ContextManager
+from pixibot.lib.factory import make_agent
 from pixibot.model import MockModel, ModelResponse, ToolCall
 
 

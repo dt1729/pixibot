@@ -1,4 +1,4 @@
-# Contract: pixibot.tools
+# Contract: pixibot.lib.tools
 
 **Status:** accepted
 **Depth:** senior
@@ -54,10 +54,10 @@ thing we want breakable — the harness decides which implementation backs a sch
 
 ## Dependencies
 
-- **May import:** `pixibot.blackboard`, `pixibot.agent` (types only, under TYPE_CHECKING)
+- **May import:** `pixibot.blackboard`, `pixibot.lib.agent` (types only, under TYPE_CHECKING)
 - **Must not import:** `pixibot.workspace` directly (it arrives on the agent),
   `pixibot.engine`, `pixibot.cli`
-- **Imported by:** `pixibot.agent`
+- **Imported by:** `pixibot.lib.agent`
 
 ## Errors
 

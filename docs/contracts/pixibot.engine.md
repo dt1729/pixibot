@@ -65,15 +65,15 @@ plain callables so the TUI, the plain shell and the tests can each pass a functi
 implementing an interface.
 
 Deliberately **not** owned here: what the gate checks (`pixibot.gates` derives it from the
-workspace), how agents are wired (`pixibot.orchestrator`), and where commands run
+workspace), how agents are wired (`pixibot.lib.orchestrator`), and where commands run
 (`pixibot.runtime`). Each of those was once an engine responsibility and each made the
 engine a file you had to edit to add a language, a topology or a sandbox.
 
 ## Dependencies
 
-- **May import:** `pixibot.gates`, `pixibot.observer`, `pixibot.orchestrator`,
-  `pixibot.tpm`, `pixibot.agent`, `pixibot.blackboard`, `pixibot.context_manager`,
-  `pixibot.model`, `pixibot.runtime`, `pixibot.workspace`, `pixibot.logbook`
+- **May import:** `pixibot.gates`, `pixibot.observer`, `pixibot.lib.orchestrator`,
+  `pixibot.lib.tpm`, `pixibot.lib.agent`, `pixibot.blackboard`, `pixibot.lib.context_manager`,
+  `pixibot.model`, `pixibot.runtime`, `pixibot.workspace`, `pixibot.lib.logbook`
 - **Must not import:** `pixibot.cli`, `pixibot.tui`, `pixibot.providers` — the UI calls
   the engine, and the provider is chosen before one is built
 - **Imported by:** `pixibot.cli`, `pixibot.tui`, `pixibot.demo`

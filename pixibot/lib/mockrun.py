@@ -11,7 +11,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from .model import MockModel, Model, ModelResponse, ToolCall
+from ..model import MockModel, Model, ModelResponse, ToolCall
 
 
 def _w(section: str, content: str) -> ModelResponse:

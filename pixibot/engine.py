@@ -18,13 +18,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import checkpoints, gates, observer, orchestrator, tpm
-from .agent import EventHook, RunContext
+from . import checkpoints, gates, observer
 from .blackboard import KIND_CONTROL, KIND_DIRECTIVE, Blackboard
 from .checkpoints import Checkpoint, Reviewer
-from .context_manager import ActivationHook, ContextManager, StartHook
 from .gates import GateReport
-from .logbook import get as _get_logger
+from .lib import orchestrator, tpm
+from .lib.agent import EventHook, RunContext
+from .lib.context_manager import ActivationHook, ContextManager, StartHook
+from .lib.logbook import get as _get_logger
 from .model import Model
 from .runtime import executor_for
 from .workspace import Workspace

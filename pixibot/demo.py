@@ -13,10 +13,11 @@ import os
 import tempfile
 from pathlib import Path
 
-from . import intake, mockrun
+from . import intake
 from .blackboard import Blackboard
 from .engine import Engine
 from .interaction import Broker
+from .lib import mockrun
 
 
 def _payload(bb: Blackboard, section: str) -> str:

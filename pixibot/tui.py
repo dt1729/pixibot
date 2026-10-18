@@ -19,7 +19,7 @@ This module **renders**; it does not sequence builds. Every command goes to the
 same :class:`~pixibot.cli.ChatSession` the plain shell drives, with the session's
 progress hooks pointed at thread-safe pane writers — so the two front ends cannot
 drift apart, which they had (the TUI carried its own copy of build-from parsing).
-Completion lives in :mod:`pixibot.completion`, where it is testable without a
+Completion lives in :mod:`pixibot.lib.completion`, where it is testable without a
 terminal.
 
 Builds run in a background worker so the shell stays usable. Requires a recent
@@ -46,9 +46,9 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Footer, Input, RichLog, Static
 
-from . import completion
 from .cli import COMMANDS, ChatSession
-from .logbook import get as _get_logger
+from .lib import completion
+from .lib.logbook import get as _get_logger
 
 _log = _get_logger("tui")
 

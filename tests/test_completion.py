@@ -2,7 +2,7 @@
 
 import unittest
 
-from pixibot.completion import Sources, common_prefix, complete, path_candidates
+from pixibot.lib.completion import Sources, common_prefix, complete, path_candidates
 
 COMMANDS = frozenset({"build", "build-from", "cat", "cd", "ls", "ask", "tell", "think",
                       "status", "report"})

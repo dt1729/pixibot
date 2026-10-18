@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from pixibot.blackboard import KIND_ARTIFACT, Blackboard
-from pixibot.context_manager import ContextManager
+from pixibot.lib.context_manager import ContextManager
 
 
 class CoordinationTest(unittest.TestCase):

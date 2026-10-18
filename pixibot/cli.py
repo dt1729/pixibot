@@ -21,11 +21,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar, Protocol
 
-from . import console, intake, logbook, observer, providers
+from . import intake, observer, providers
 from .blackboard import KIND_CONTROL, Blackboard
 from .checkpoints import Checkpoint, Review
 from .engine import Engine
 from .interaction import Broker, latest_reports
+from .lib import console, logbook
 from .providers import Provider
 from .schema import validate_input
 from .workspace import Workspace

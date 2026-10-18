@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from .blackboard import KIND_ARTIFACT, Blackboard, Event
+from ..blackboard import KIND_ARTIFACT, Blackboard, Event
 from .logbook import get as _get_logger
 
 _log = _get_logger("cm")

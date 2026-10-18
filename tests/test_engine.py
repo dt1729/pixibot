@@ -5,9 +5,9 @@ import shutil
 import tempfile
 import unittest
 
-from pixibot import mockrun
 from pixibot.blackboard import Blackboard
 from pixibot.engine import Engine
+from pixibot.lib import mockrun
 
 
 class EngineTest(unittest.TestCase):

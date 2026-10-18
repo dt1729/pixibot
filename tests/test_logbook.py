@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pixibot import logbook
+from pixibot.lib import logbook
 
 
 class LogbookTest(unittest.TestCase):

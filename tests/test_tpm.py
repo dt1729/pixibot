@@ -3,9 +3,9 @@
 import json
 import unittest
 
+from pixibot.lib.tpm import plan
 from pixibot.model import MockModel, ModelResponse
 from pixibot.schema import ValidationFailed
-from pixibot.tpm import plan
 
 
 def valid_projection_json():

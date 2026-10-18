@@ -183,11 +183,11 @@ class _OfflineProvider:
     live = False
 
     def tpm_model(self, objective: str = "") -> Model:
-        from . import mockrun
+        from .lib import mockrun
         return mockrun.mock_tpm_model(objective or "the requested feature")
 
     def model_factory(self, *, hard: bool = False) -> ModelFactory:  # noqa: ARG002
-        from . import mockrun
+        from .lib import mockrun
         return mockrun.mock_model_factory()
 
     def spokesbot(self) -> Model | None:

@@ -73,7 +73,7 @@ the program works, so they are reported as context rather than as the verdict.
 ## Dependencies
 
 - **May import:** `pixibot.providers`, `pixibot.engine`, `pixibot.blackboard`,
-  `pixibot.logbook`, stdlib
+  `pixibot.lib.logbook`, stdlib
 - **Must not import:** `pixibot.cli`, `pixibot.tui` — a benchmark has no front end
 - **Imported by:** nothing; it is an entry point (`python -m pixibot.benchmark`)
 

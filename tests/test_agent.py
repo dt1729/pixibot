@@ -6,8 +6,8 @@ import shutil
 import tempfile
 import unittest
 
-from pixibot.agent import AgentSpec, ReasoningAgent, RunContext
 from pixibot.blackboard import Blackboard
+from pixibot.lib.agent import AgentSpec, ReasoningAgent, RunContext
 from pixibot.model import MockModel, ModelResponse, ToolCall
 from pixibot.workspace import Workspace
 

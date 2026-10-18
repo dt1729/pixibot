@@ -27,10 +27,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import logbook, providers
+from . import providers
 from .blackboard import Blackboard
 from .engine import ALL_FEATURES, DEFAULT_FEATURES, Engine, default_input
-from .logbook import get as _get_logger
+from .lib import logbook
+from .lib.logbook import get as _get_logger
 
 _log = _get_logger("benchmark")
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..model import Model
 from .agent import AgentSpec, ReasoningAgent, RunContext
-from .model import Model
 from .standards import standards_contract
 
 ROLE_BRIEFS = {

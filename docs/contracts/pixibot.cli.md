@@ -73,9 +73,9 @@ one line in the table, which is also what the completer reads.
 
 - **May import:** `pixibot.providers`, `pixibot.engine`, `pixibot.interaction`,
   `pixibot.observer`, `pixibot.intake`, `pixibot.schema`, `pixibot.workspace`,
-  `pixibot.console`, `pixibot.logbook`, `pixibot.blackboard`
+  `pixibot.lib.console`, `pixibot.lib.logbook`, `pixibot.blackboard`
 - **Must not import:** `pixibot.tui` (the TUI imports the session, not the reverse),
-  `pixibot.agent`, `pixibot.orchestrator`
+  `pixibot.lib.agent`, `pixibot.lib.orchestrator`
 - **Imported by:** `pixibot.tui`, `pixibot.__main__`
 
 ## Errors

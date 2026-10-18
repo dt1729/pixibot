@@ -1,4 +1,4 @@
-# Contract: pixibot.agent
+# Contract: pixibot.lib.agent
 
 **Status:** accepted
 **Depth:** principal
@@ -79,12 +79,12 @@ way to vary an agent instead of re-listing every argument.
 
 ## Dependencies
 
-- **May import:** `pixibot.blackboard`, `pixibot.context_manager`, `pixibot.model`,
-  `pixibot.tools`, `pixibot.logbook`, `pixibot.workspace` (types only), stdlib
-- **Must not import:** `pixibot.engine`, `pixibot.orchestrator`, `pixibot.cli`,
+- **May import:** `pixibot.blackboard`, `pixibot.lib.context_manager`, `pixibot.model`,
+  `pixibot.lib.tools`, `pixibot.lib.logbook`, `pixibot.workspace` (types only), stdlib
+- **Must not import:** `pixibot.engine`, `pixibot.lib.orchestrator`, `pixibot.cli`,
   `pixibot.providers` — an agent does not know who scheduled it or which provider built
   its model
-- **Imported by:** `pixibot.factory`, `pixibot.orchestrator`, `pixibot.tools` (types)
+- **Imported by:** `pixibot.lib.factory`, `pixibot.lib.orchestrator`, `pixibot.lib.tools` (types)
 
 ## Errors
 
