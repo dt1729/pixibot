@@ -1,15 +1,23 @@
 """Top-level pipeline: strict input -> TPM -> MoA -> run -> Observer report.
 
-``run_pipeline`` is provider-agnostic — pass a ``tpm_model`` and a
-``model_factory``. Use MockModel for offline/tests; the ``anthropic_*`` helpers
-wire real Claude (needs ``ANTHROPIC_API_KEY`` and the ``anthropic`` package).
+``run_pipeline`` is provider-agnostic: pass a ``tpm_model`` and a
+``model_factory``, both of which :mod:`pixibot.providers` will hand you for any
+provider name (``providers.get("offline")`` needs no API key).
+
+    p = providers.get(providers.detect())
+    run_pipeline(inp, tpm_model=p.tpm_model(), model_factory=p.model_factory(),
+                 bb=Blackboard("pixibot.db"))
+
+For a persistent run you can steer and revise, use :class:`pixibot.engine.Engine`
+instead; this function is the one-shot form.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
-from . import config, observer, orchestrator, tpm
+from . import observer, orchestrator, tpm
 from .blackboard import Blackboard
 from .context_manager import ContextManager
 from .model import Model
@@ -17,13 +25,14 @@ from .schema import ValidationFailed, validate_input
 
 
 def run_pipeline(
-    inp: dict,
+    inp: dict[str, Any],
     *,
     tpm_model: Model,
-    model_factory: Callable[[dict], Model],
+    model_factory: Callable[[dict[str, Any]], Model],
     bb: Blackboard,
     max_steps: int = 100,
-) -> dict:
+) -> dict[str, Any]:
+    """Plan, materialize and drive one run to quiescence; return its report."""
     errors = validate_input(inp)
     if errors:
         raise ValidationFailed(errors)
@@ -33,117 +42,3 @@ def run_pipeline(
     orchestrator.kick(bb, projection)
     steps = cm.run()
     return {"projection": projection, "steps": steps, "report": observer.report(bb)}
-
-
-# ── real-Claude wiring (lazy; needs ANTHROPIC_API_KEY) ───────────────────────
-def anthropic_tpm_model() -> Model:
-    from .model import AnthropicModel
-    return AnthropicModel(config.DEFAULT_MODEL)
-
-
-def make_anthropic_model_factory(hard: bool = False):
-    """Per-agent model factory. Hard development routes principal -> Fable 5 at xhigh."""
-    from .model import AnthropicModel
-
-    def factory(spec: dict) -> Model:
-        depth = spec.get("budget", {}).get("depth", "senior")
-        return AnthropicModel(
-            config.model_for(depth, hard=hard),
-            effort=config.effort_for(depth, hard=hard),
-        )
-    return factory
-
-
-def anthropic_model_factory(spec: dict) -> Model:
-    return make_anthropic_model_factory(False)(spec)
-
-
-# ── Gemini (OpenAI-compatible) wiring ────────────────────────────────────────
-def make_gemini_model_factory(hard: bool = False):
-    from .model import OpenAICompatModel
-
-    def factory(spec: dict) -> Model:
-        depth = spec.get("budget", {}).get("depth", "senior")
-        return OpenAICompatModel(
-            config.gemini_model_for(depth, hard=hard),
-            base_url=config.GEMINI_BASE_URL, api_key_env="GEMINI_API_KEY",
-        )
-    return factory
-
-
-def gemini_tpm_model() -> Model:
-    from .model import OpenAICompatModel
-    return OpenAICompatModel(
-        config.GEMINI_DEPTH_MODELS["senior"],
-        base_url=config.GEMINI_BASE_URL, api_key_env="GEMINI_API_KEY", max_tokens=8192,
-    )
-
-
-# ── OpenRouter (OpenAI-compatible) wiring ────────────────────────────────────
-def make_openrouter_model_factory(hard: bool = False):
-    from .model import OpenAICompatModel
-
-    def factory(spec: dict) -> Model:
-        depth = spec.get("budget", {}).get("depth", "senior")
-        return OpenAICompatModel(
-            config.openrouter_model_for(depth, hard=hard),
-            base_url=config.OPENROUTER_BASE_URL, api_key_env="OPENROUTER_API_KEY",
-        )
-    return factory
-
-
-def openrouter_tpm_model() -> Model:
-    from .model import OpenAICompatModel
-    return OpenAICompatModel(
-        config.OPENROUTER_DEPTH_MODELS["senior"],
-        base_url=config.OPENROUTER_BASE_URL, api_key_env="OPENROUTER_API_KEY", max_tokens=8192,
-    )
-
-
-def _demo() -> None:  # pragma: no cover - manual smoke run
-    import json
-    import os
-    import tempfile
-
-    from .model import MockModel, ModelResponse, ToolCall
-
-    inp = {
-        "objective": "Build a greeting library",
-        "target": {"language": "python", "framework": "none", "platform": "linux"},
-        "constraints": [], "non_goals": [], "acceptance_criteria": ["greet() returns a string"],
-        "review_cadence": "per-feature",
-        "budget_ceilings": {"compute": 100000, "max_depth": "senior", "scope": "one module"},
-    }
-    projection = {
-        "plan_summary": "one feature: greet()",
-        "breakdown": [{"id": "f1", "desc": "greet", "depends_on": []}],
-        "blackboard_schema": {"sections": ["impl/f1"]},
-        "agents": [{
-            "id": "prog-f1", "role": "programmer",
-            "budget": {"compute": 40000, "depth": "senior", "scope": "impl/f1"},
-            "blackboard": {"reads": [], "writes": ["impl/f1"]},
-            "activates_on": "message",
-        }],
-        "checkpoints": [{"id": "cp1", "after": ["prog-f1"], "demo": "import and call greet",
-                         "gate": "user_feedback"}],
-    }
-    tpm_model = MockModel([ModelResponse(text=json.dumps(projection))])
-
-    def factory(spec):
-        section = spec["blackboard"]["writes"][0]
-        return MockModel([
-            ModelResponse(tool_calls=[ToolCall("t1", "write_artifact",
-                          {"section": section, "content": "def greet(): return 'hi'"})],
-                          stop_reason="tool_use"),
-            ModelResponse(text="done", stop_reason="end_turn"),
-        ])
-
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    bb = Blackboard(path, run_id="demo")
-    result = run_pipeline(inp, tpm_model=tpm_model, model_factory=factory, bb=bb)
-    print(result["report"])
-
-
-if __name__ == "__main__":  # pragma: no cover
-    _demo()

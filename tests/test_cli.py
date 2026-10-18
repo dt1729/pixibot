@@ -148,17 +148,26 @@ class CliTest(unittest.TestCase):
         self.assertTrue(self.session.hard)
 
     def test_provider_switch(self):
-        seen = []
-
-        def builder(name):
-            seen.append(name)
-            return (f"{name} label", name != "offline", FakeBroker(), lambda h, o: FakeEngine())
-
         s = ChatSession(self.bb, self.broker, lambda h, o: self.engine,
-                        workspace=self.ws, provider_builder=builder, provider_name="offline")
+                        workspace=self.ws, provider_name="offline")
         self.assertIn("provider:", s.handle("provider"))
         self.assertIn("gemini", s.handle("provider gemini"))
         self.assertEqual(s.provider_name, "gemini")
+        # a switch re-wires the broker and drops the engine built on the old provider
+        self.assertIsNot(s.broker, self.broker)
+        self.assertIsNone(s.engine)
+
+    def test_provider_switch_rejects_an_unknown_name(self):
+        out = self.session.handle("provider wizard")
+        self.assertIn("unknown provider", out)
+        self.assertEqual(self.session.provider_name, "custom")
+
+    def test_provider_switch_back_to_offline_disables_live_progress(self):
+        s = ChatSession(self.bb, self.broker, lambda h, o: self.engine,
+                        workspace=self.ws, provider_name="gemini")
+        s.handle("provider offline")
+        self.assertEqual(s.provider_name, "offline")
+        self.assertIsNone(s.progress)
 
     def test_help_quit_clear(self):
         self.assertIn("Navigate", self.session.handle("help"))

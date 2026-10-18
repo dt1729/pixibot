@@ -3,7 +3,7 @@
 The prompts are deliberately verbose — a real agent behaves far better with an
 explicit charter (what it owns, what "done" means, how to hand off) than with a
 one-liner. Depth shapes which abstraction layers to reason about; the caller
-picks the model tier and effort for that depth (config.py). The standards
+picks the model tier and effort for that depth (providers.py). The standards
 contract is injected so the quality bar is always present.
 """
 

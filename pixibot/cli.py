@@ -11,11 +11,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
-from . import config, console, intake, mockrun, observer
+from . import console, intake, observer, providers
 from .blackboard import Blackboard
 from .engine import Engine
 from .interaction import Broker
+from .providers import Provider
 from .workspace import Workspace
 
 HELP = """Navigate the project (bash-style):
@@ -47,14 +50,17 @@ COMMANDS = {
     "build", "build-from", "buildfrom", "revise", "tell", "ask",
     "status", "agents", "report", "form", "provider", "hard", "think", "updates",
 }
+# (hard, objective) -> a fresh Engine for this provider
+EngineFactory = Callable[[bool, str], Engine]
+
 HEAVY = {"build", "build-from", "buildfrom", "revise", "tell"}  # spin while these run
 
 
 class ChatSession:
     """Command router / shell (testable without the input loop)."""
 
-    def __init__(self, bb: Blackboard, broker: Broker, engine_factory, *,
-                 workspace: Workspace = None, provider_builder=None, provider_name: str = "custom"):
+    def __init__(self, bb: Blackboard, broker: Broker, engine_factory: EngineFactory, *,
+                 workspace: Workspace | None = None, provider_name: str = "custom"):
         self.bb = bb
         self.broker = broker
         self.engine_factory = engine_factory
@@ -64,7 +70,6 @@ class ChatSession:
         self.engine = None
         self.progress = None        # agent finished
         self.progress_start = None  # agent started
-        self.provider_builder = provider_builder
         self.provider_name = provider_name
 
     # ── bash-style navigation ───────────────────────────────────────────────
@@ -211,16 +216,15 @@ class ChatSession:
     def _provider(self, arg):
         arg = arg.strip().lower()
         if not arg:
-            return f"provider: {self.provider_name}.  switch with: provider <{' | '.join(PROVIDERS)}>"
-        if arg not in PROVIDERS:
-            return f"unknown provider '{arg}'. options: {', '.join(PROVIDERS)}"
-        if self.provider_builder is None:
-            return "(provider switching not available here)"
-        label, use_real, broker, factory = self.provider_builder(arg)
-        self.broker, self.engine_factory = broker, factory
-        self.provider_name, self.engine = arg, None
-        self.progress = _progress if use_real else None
-        return f"switched to {label} — run a fresh build"
+            return (f"provider: {self.provider_name}.  "
+                    f"switch with: provider <{' | '.join(providers.NAMES)}>")
+        if arg not in providers.NAMES:
+            return f"unknown provider '{arg}'. options: {', '.join(providers.NAMES)}"
+        provider = providers.get(arg)
+        self.broker, self.engine_factory = wire(self.bb, provider)
+        self.provider_name, self.engine = provider.name, None
+        self.progress = _progress if provider.live else None
+        return f"switched to {provider.label} — run a fresh build"
 
     # ── dispatch ──────────────────────────────────────────────────────────────
     def handle(self, line: str) -> str:
@@ -309,88 +313,24 @@ class ChatSession:
 
 
 # ── provider wiring ──────────────────────────────────────────────────────────
-def _anthropic_spokesbot():
-    from .model import AnthropicModel
-    # No caching: the spokesbot's system prompt embeds a live snapshot that changes
-    # every call, so a cache write would never be read.
-    return AnthropicModel(config.SPOKESBOT_MODEL, effort=None, use_thinking=False,
-                          max_tokens=1024, use_cache=False)
+# Everything provider-specific lives in pixibot.providers; this is the only place
+# that turns a provider into the two objects a session holds.
+def wire(bb: Blackboard, provider: Provider) -> tuple[Broker, EngineFactory]:
+    """Build the broker and engine-maker for `provider` over blackboard `bb`."""
+
+    def make_engine(hard: bool, objective: str) -> Engine:
+        return Engine(bb, provider.tpm_model(objective),
+                      provider.model_factory(hard=hard))
+
+    return Broker(bb, provider.spokesbot), make_engine
 
 
-def _gemini_spokesbot():
-    from .model import OpenAICompatModel
-    return OpenAICompatModel(config.GEMINI_SPOKESBOT_MODEL, base_url=config.GEMINI_BASE_URL,
-                             api_key_env="GEMINI_API_KEY", max_tokens=1024)
-
-
-def _openrouter_spokesbot():
-    from .model import OpenAICompatModel
-    return OpenAICompatModel(config.OPENROUTER_SPOKESBOT_MODEL, base_url=config.OPENROUTER_BASE_URL,
-                             api_key_env="OPENROUTER_API_KEY", max_tokens=1024)
-
-
-def _live_engine_factory(bb):
-    from .run import anthropic_tpm_model, make_anthropic_model_factory
-
-    def make(hard, objective):
-        return Engine(bb, anthropic_tpm_model(), make_anthropic_model_factory(hard))
-    return make
-
-
-def _gemini_engine_factory(bb):
-    from .run import gemini_tpm_model, make_gemini_model_factory
-
-    def make(hard, objective):
-        return Engine(bb, gemini_tpm_model(), make_gemini_model_factory(hard))
-    return make
-
-
-def _openrouter_engine_factory(bb):
-    from .run import make_openrouter_model_factory, openrouter_tpm_model
-
-    def make(hard, objective):
-        return Engine(bb, openrouter_tpm_model(), make_openrouter_model_factory(hard))
-    return make
-
-
-def _offline_engine_factory(bb):
-    def make(hard, objective):
-        return Engine(bb, mockrun.mock_tpm_model(objective), mockrun.mock_model_factory())
-    return make
-
-
-PROVIDERS = ("anthropic", "gemini", "openrouter", "offline")
-
-
-def _make_provider(bb, name):
-    if name == "gemini":
-        return ("gemini (Google AI Studio)", True, Broker(bb, lambda: _gemini_spokesbot()),
-                _gemini_engine_factory(bb))
-    if name == "openrouter":
-        return ("openrouter", True, Broker(bb, lambda: _openrouter_spokesbot()),
-                _openrouter_engine_factory(bb))
-    if name == "anthropic":
-        return ("anthropic (Claude)", True, Broker(bb, lambda: _anthropic_spokesbot()),
-                _live_engine_factory(bb))
-    return ("offline (mock)", False, Broker(bb, lambda: None), _offline_engine_factory(bb))
-
-
-def _auto_provider_name():
-    if os.environ.get("GEMINI_API_KEY"):
-        return "gemini"
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return "openrouter"
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    return "offline"
-
-
-def _progress_start(agent_id):
+def _progress_start(agent_id: str) -> None:
     console.write(f"  {console.c('▸', 'yellow')} {console.label(agent_id)} "
                   f"{console.c('working…', 'dim')}\n")
 
 
-def _progress(agent_id, terminal, wrote):
+def _progress(agent_id: str, terminal: str, wrote: list[str | None]) -> None:
     tag = console.label(agent_id)
     if wrote:
         shown = ", ".join(wrote[:6]) + (f" (+{len(wrote) - 6} more)" if len(wrote) > 6 else "")
@@ -399,10 +339,10 @@ def _progress(agent_id, terminal, wrote):
         console.write(f"  {console.c('•', 'gray')} {tag} {console.c(terminal.lower(), 'dim')}\n")
 
 
-def main(argv=None) -> None:
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="pixibot", description="Pixibot shell")
     ap.add_argument("--db", default="pixibot.db")
-    ap.add_argument("--provider", choices=("auto",) + PROVIDERS, default="auto")
+    ap.add_argument("--provider", choices=("auto", *providers.NAMES), default="auto")
     ap.add_argument("--objective", help="one-shot: build this, then drop into the shell")
     ap.add_argument("--tui", action="store_true", help="force the split-pane TUI")
     ap.add_argument("--plain", action="store_true", help="force the plain shell (no TUI)")
@@ -427,11 +367,13 @@ def main(argv=None) -> None:
         pass
 
     bb = Blackboard(args.db, run_id="cli")
-    workspace = Workspace(os.path.join(os.path.expanduser("~/pixibot-workspace"), "cli"))
-    name = args.provider if args.provider != "auto" else _auto_provider_name()
-    label, use_real, broker, engine_factory = _make_provider(bb, name)
+    workspace = Workspace(str(Path("~/pixibot-workspace").expanduser() / "cli"))
+    provider = providers.get(args.provider if args.provider != "auto"
+                             else providers.detect())
+    broker, engine_factory = wire(bb, provider)
     session = ChatSession(bb, broker, engine_factory, workspace=workspace,
-                          provider_builder=lambda n: _make_provider(bb, n), provider_name=name)
+                          provider_name=provider.name)
+    label, use_real = provider.label, provider.live
 
     # Default to the split-pane TUI when possible; fall back to the plain shell.
     if args.tui or (not args.plain and sys.stdout.isatty()):
