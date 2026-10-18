@@ -2,13 +2,25 @@
 
 Agents affect the world through tools. With a workspace attached they write and
 run **real files**; everything is also logged to the blackboard so the Observer
-keeps a full audit trail. Tool *definitions* (schema the model sees) are separate
-from *implementations* (what the harness runs), so the harness can gate and log.
+keeps a full audit trail. Tool *definitions* (the schema the model sees) are kept
+apart from *implementations* (what the harness runs), so the harness can gate,
+refuse and log without the model's cooperation.
+
+Each implementation is a module-level function of ``(agent, blackboard, input)``
+returning the text the model will read — including refusals, which are written to
+be acted on rather than merely reported.
+
+Contract: docs/contracts/pixibot.tools.md
 """
 
 from __future__ import annotations
 
-from .blackboard import KIND_ARTIFACT, KIND_CONTROL
+from typing import TYPE_CHECKING, Any
+
+from .blackboard import KIND_ARTIFACT, KIND_CONTROL, Blackboard
+
+if TYPE_CHECKING:
+    from .agent import ReasoningAgent, ToolImpl
 
 WRITE_ARTIFACT = {
     "name": "write_artifact",
@@ -64,75 +76,95 @@ SEND_MESSAGE = {
     },
 }
 
-DEFAULT_TOOL_DEFS = [WRITE_ARTIFACT, READ_FILE, LIST_FILES, RUN_BASH, SEND_MESSAGE]
+DEFAULT_TOOL_DEFS: list[dict[str, Any]] = [
+    WRITE_ARTIFACT, READ_FILE, LIST_FILES, RUN_BASH, SEND_MESSAGE,
+]
 
-
+# Adoption D: a test-designer designs from the specification, so implementation
+# reads are refused at the tool layer rather than discouraged in prose.
 _BLIND_REFUSAL = ("refused: your role designs tests from the specification and the "
                   "architecture's declared interfaces, not the implementation. You may not "
                   "read implementation files — encode what the software SHOULD do.")
 
+# A tool input that arrives without its required field is almost always a response
+# truncated at the output limit, mid-JSON. Say so, because "retry smaller" is the
+# recovery and the model cannot see its own truncation.
+_TRUNCATED_WRITE = ("error: write_artifact needs both 'section' and 'content' — your tool "
+                    "input looks TRUNCATED (cut off at the output limit). Retry with a "
+                    "smaller file, writing one file per call.")
+_TRUNCATED_BASH = ("error: run_bash needs a 'command' — your tool input looks TRUNCATED "
+                   "(cut off at the output limit). Retry with a shorter command.")
 
-def _denies(agent, target: str) -> bool:
-    """True if `target` (a path, or a shell command that references one) hits the
-    agent's read denylist (adoption D — mechanical test-designer blindness)."""
-    for pat in getattr(agent, "read_denylist", ()) or ():
+_OUTPUT_CLIP = 4000  # command output handed back to the model
+
+
+def _denies(agent: ReasoningAgent, target: str) -> bool:
+    """True if `target` (a path, or a command naming one) hits the read denylist."""
+    for pat in agent.read_denylist or ():
         p = pat.rstrip("/")
-        if target == pat or target == p or target.startswith(p + "/") or p in target:
+        if target in (pat, p) or target.startswith(p + "/") or p in target:
             return True
     return False
 
 
-def default_tool_impls() -> dict:
-    """Return name -> callable(agent, blackboard, input) -> result string."""
+def write_artifact(agent: ReasoningAgent, bb: Blackboard, inp: dict[str, Any]) -> str:
+    """Create or replace a file — in the workspace, or on the blackboard without one."""
+    if not inp.get("section") or inp.get("content") is None:
+        return _TRUNCATED_WRITE
+    section, content = inp["section"], inp["content"]
+    ws = agent.workspace
+    if ws is not None:
+        # The agent logs all file changes to the blackboard after its turn (so
+        # run_bash-written files are captured too, exactly once).
+        ws.write_file(section, content)
+        return f"wrote {section} ({len(content)} chars)"
+    bb.send(agent.agent_id, content, kind=KIND_ARTIFACT, section=section)
+    return f"wrote {section} ({len(content)} chars) to blackboard"
 
-    def write_artifact(agent, bb, inp):
-        if not inp.get("section") or inp.get("content") is None:
-            # Almost always a max_tokens truncation mid-tool-input: the JSON was cut
-            # off before 'content' arrived, so nothing was written.
-            return ("error: write_artifact needs both 'section' and 'content' — your tool "
-                    "input looks TRUNCATED (cut off at the output limit). Retry with a "
-                    "smaller file, writing one file per call.")
-        ws = getattr(agent, "workspace", None)
-        if ws is not None:
-            # Write the real file; the agent logs all file changes to the blackboard
-            # after its turn (so run_bash-written files are captured too, once).
-            ws.write_file(inp["section"], inp["content"])
-            return f"wrote {inp['section']} ({len(inp['content'])} chars)"
-        bb.send(agent.agent_id, inp["content"], kind=KIND_ARTIFACT, section=inp["section"])
-        return f"wrote {inp['section']} ({len(inp['content'])} chars) to blackboard"
 
-    def read_file(agent, bb, inp):
-        if _denies(agent, inp["path"]):
-            return _BLIND_REFUSAL
-        ws = getattr(agent, "workspace", None)
-        content = ws.read_file(inp["path"]) if ws is not None else None
-        if content is None:  # fall back to a blackboard artifact at that section
-            ev = bb.read_section(inp["path"])
-            content = ev.payload if ev else None
-        return content if content is not None else f"(no file: {inp['path']})"
+def read_file(agent: ReasoningAgent, bb: Blackboard, inp: dict[str, Any]) -> str:
+    """Read a workspace file, falling back to a blackboard artifact at that section."""
+    path = inp["path"]
+    if _denies(agent, path):
+        return _BLIND_REFUSAL
+    ws = agent.workspace
+    content = ws.read_file(path) if ws is not None else None
+    if content is None:
+        ev = bb.read_section(path)
+        content = ev.payload if ev else None
+    return content if content is not None else f"(no file: {path})"
 
-    def list_files(agent, bb, inp):
-        ws = getattr(agent, "workspace", None)
-        files = ws.list_files() if ws is not None else list(bb.current_state())
-        return "\n".join(files) if files else "(empty workspace)"
 
-    def run_bash(agent, bb, inp):
-        if not inp.get("command"):
-            return ("error: run_bash needs a 'command' — your tool input looks TRUNCATED "
-                    "(cut off at the output limit). Retry with a shorter command.")
-        ws = getattr(agent, "workspace", None)
-        if ws is None:
-            return "(no workspace available to run commands)"
-        if _denies(agent, inp["command"]):
-            return _BLIND_REFUSAL
-        rc, out = ws.run(inp["command"])
-        bb.send(agent.agent_id, f"$ {inp['command']}\n(exit {rc})\n{out}", kind=KIND_CONTROL)
-        return f"(exit {rc})\n{out[:4000]}"
+def list_files(agent: ReasoningAgent, bb: Blackboard, inp: dict[str, Any]) -> str:  # noqa: ARG001
+    """Every file in the workspace, or every written section without one."""
+    ws = agent.workspace
+    files = ws.list_files() if ws is not None else list(bb.current_state())
+    return "\n".join(files) if files else "(empty workspace)"
 
-    def send_message(agent, bb, inp):
-        bb.send(agent.agent_id, inp["content"], to=inp["to"])
-        return f"sent message to {inp['to']}"
 
+def run_bash(agent: ReasoningAgent, bb: Blackboard, inp: dict[str, Any]) -> str:
+    """Run a command in the workspace; the transcript is kept on the blackboard."""
+    if not inp.get("command"):
+        return _TRUNCATED_BASH
+    command = inp["command"]
+    ws = agent.workspace
+    if ws is None:
+        return "(no workspace available to run commands)"
+    if _denies(agent, command):
+        return _BLIND_REFUSAL
+    rc, out = ws.run(command)
+    bb.send(agent.agent_id, f"$ {command}\n(exit {rc})\n{out}", kind=KIND_CONTROL)
+    return f"(exit {rc})\n{out[:_OUTPUT_CLIP]}"
+
+
+def send_message(agent: ReasoningAgent, bb: Blackboard, inp: dict[str, Any]) -> str:
+    """Address another agent (or '*'); delivery is the scheduler's inbox (§3)."""
+    bb.send(agent.agent_id, inp["content"], to=inp["to"])
+    return f"sent message to {inp['to']}"
+
+
+def default_tool_impls() -> dict[str, ToolImpl]:
+    """name -> callable(agent, blackboard, input) -> result text."""
     return {
         "write_artifact": write_artifact,
         "read_file": read_file,

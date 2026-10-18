@@ -27,6 +27,9 @@ class FakeEngine:
     def __init__(self):
         self.calls = []
         self.on_activation = None
+        self.on_agent_start = None
+        self.on_event = None
+        self.sandbox = "auto"
         self.workspace = None
 
     def build_objective(self, objective, *, hard=False):
@@ -57,7 +60,7 @@ class CliTest(unittest.TestCase):
         self.ws.write_file("tests/test_reverse.py", "assert True")
         self.broker = FakeBroker()
         self.engine = FakeEngine()
-        self.session = ChatSession(self.bb, self.broker, lambda h, o: self.engine, workspace=self.ws)
+        self.session = ChatSession(self.bb, self.broker, lambda objective, hard=False: self.engine, workspace=self.ws)
 
     def tearDown(self):
         self.bb.close()
@@ -148,7 +151,7 @@ class CliTest(unittest.TestCase):
         self.assertTrue(self.session.hard)
 
     def test_provider_switch(self):
-        s = ChatSession(self.bb, self.broker, lambda h, o: self.engine,
+        s = ChatSession(self.bb, self.broker, lambda objective, hard=False: self.engine,
                         workspace=self.ws, provider_name="offline")
         self.assertIn("provider:", s.handle("provider"))
         self.assertIn("gemini", s.handle("provider gemini"))
@@ -163,11 +166,25 @@ class CliTest(unittest.TestCase):
         self.assertEqual(self.session.provider_name, "custom")
 
     def test_provider_switch_back_to_offline_disables_live_progress(self):
-        s = ChatSession(self.bb, self.broker, lambda h, o: self.engine,
+        s = ChatSession(self.bb, self.broker, lambda objective, hard=False: self.engine,
                         workspace=self.ws, provider_name="gemini")
         s.handle("provider offline")
         self.assertEqual(s.provider_name, "offline")
         self.assertIsNone(s.progress)
+
+    def test_build_hands_the_sessions_hooks_to_the_engine(self):
+        seen = []
+        self.session.progress = lambda a, t, f: seen.append(("done", a))
+        self.session.progress_start = lambda a: seen.append(("start", a))
+        self.session.on_event = lambda a, k, d: seen.append(("event", a))
+        self.session.on_build_start = lambda o: seen.append(("build", o))
+        self.session.sandbox = "local"
+        self.session.handle("build a thing")
+        self.assertIn(("build", "a thing"), seen)          # title hook fired
+        self.assertIs(self.engine.on_activation, self.session.progress)
+        self.assertIs(self.engine.on_agent_start, self.session.progress_start)
+        self.assertIs(self.engine.on_event, self.session.on_event)
+        self.assertEqual(self.engine.sandbox, "local")
 
     def test_help_quit_clear(self):
         self.assertIn("Navigate", self.session.handle("help"))

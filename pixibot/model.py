@@ -17,14 +17,26 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any
+
+from .logbook import get as _get_logger
+
+#: One message in Anthropic content-block shape - the wire format Pixibot speaks
+#: internally, translated on the way out for OpenAI-compatible endpoints.
+Message = dict[str, Any]
+#: A tool schema as the model sees it (name, description, input_schema).
+ToolDef = dict[str, Any]
+#: A system prompt: plain text, or content blocks once cache markers are applied.
+SystemPrompt = str | list[dict[str, Any]]
+#: Streaming sink for text deltas.
+DeltaSink = Callable[[str], None]
 
 
 @dataclass
 class ToolCall:
     id: str
     name: str
-    input: dict
+    input: dict[str, Any]
 
 
 @dataclass
@@ -38,10 +50,13 @@ class ModelResponse:
 class Model:
     """Interface: turn (system, messages, tools) into a ModelResponse."""
 
-    def generate(self, *, system: str, messages: list[dict], tools: list[dict]) -> ModelResponse:
+    def generate(self, *, system: SystemPrompt, messages: list[Message],
+                 tools: list[ToolDef]) -> ModelResponse:
         raise NotImplementedError
 
-    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+    def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
+                        tools: list[ToolDef],
+                        on_delta: DeltaSink | None = None) -> ModelResponse:
         """Default: non-streaming, emit the whole text once. Overridden by AnthropicModel."""
         resp = self.generate(system=system, messages=messages, tools=tools)
         if on_delta and resp.text:
@@ -50,7 +65,7 @@ class Model:
 
 
 # A script item is either a fixed response or a function of the messages so far.
-ScriptItem = Union[ModelResponse, Callable[[list[dict]], ModelResponse]]
+ScriptItem = ModelResponse | Callable[[list[Message]], ModelResponse]
 
 
 class MockModel(Model):
@@ -60,15 +75,14 @@ class MockModel(Model):
         self._script = list(script)
         self._i = 0
 
-    def generate(self, *, system, messages, tools) -> ModelResponse:
+    def generate(self, *, system: SystemPrompt,  # noqa: ARG002 - a script ignores both
+                 messages: list[Message], tools: list[ToolDef]) -> ModelResponse:  # noqa: ARG002
         if self._i >= len(self._script):
             return ModelResponse(text="(no more script)", stop_reason="end_turn")
         item = self._script[self._i]
         self._i += 1
         return item(messages) if callable(item) else item
 
-
-from .logbook import get as _get_logger
 
 _mlog = _get_logger("model")
 
@@ -79,7 +93,7 @@ _mlog = _get_logger("model")
 _CACHE_CTL = {"type": "ephemeral", "ttl": "1h"}
 
 
-def _cached_system(system):
+def _cached_system(system: SystemPrompt) -> SystemPrompt:
     """Wrap the system prompt so tools+system are cached (render order is
     tools -> system -> messages, so a breakpoint on the last system block covers
     both). Returns a new value; never mutates the caller's."""
@@ -93,11 +107,11 @@ def _cached_system(system):
     return blocks
 
 
-def _sanitize_messages(messages):
+def _sanitize_messages(messages: list[Message]) -> list[Message]:
     """Drop empty text blocks (and messages left with no content). The API rejects
     empty text content blocks, and a persisted stateful transcript can contain one
     from a model turn that produced neither text nor a tool call."""
-    out = []
+    out: list[Message] = []
     for m in messages:
         content = m.get("content")
         if isinstance(content, list):
@@ -114,11 +128,11 @@ def _sanitize_messages(messages):
     return out
 
 
-def _drop_unmatched_tool_use(messages):
+def _drop_unmatched_tool_use(messages: list[Message]) -> list[Message]:
     """Remove tool_use blocks not immediately followed by their tool_result (the API
     rejects them with a 400). Defence-in-depth against a persisted transcript that
     ended mid-tool-use before the fix in the agent loop."""
-    out = []
+    out: list[Message] = []
     for i, m in enumerate(messages):
         if m.get("role") == "assistant" and isinstance(m.get("content"), list):
             tool_ids = [b.get("id") for b in m["content"]
@@ -135,12 +149,13 @@ def _drop_unmatched_tool_use(messages):
                                     and b.get("id") not in rids)]
                     if not kept:
                         continue
-                    m = {**m, "content": kept}
+                    out.append({**m, "content": kept})
+                    continue
         out.append(m)
     return out
 
 
-def _cached_messages(messages):
+def _cached_messages(messages: list[Message]) -> list[Message]:
     """Rolling breakpoint on the last block of the most recent turn, so the next
     request reuses the whole prior-conversation prefix. Copies before marking —
     the marker must NOT be persisted into the agent's stored transcript, or it
@@ -172,16 +187,18 @@ class AnthropicModel(Model):
         self.max_tokens = max_tokens
         self.use_thinking = use_thinking  # Haiku rejects effort/adaptive thinking
         self.use_cache = use_cache
-        self._client = None
+        self._client: Any = None   # the SDK client, built on first use
 
-    def _kwargs(self, system, messages, tools) -> dict:
+    def _kwargs(self, system: SystemPrompt, messages: list[Message],
+                tools: list[ToolDef]) -> dict[str, Any]:
         messages = _sanitize_messages(messages)          # never send empty text blocks (400)
         messages = _drop_unmatched_tool_use(messages)    # never send a dangling tool_use (400)
         if self.use_cache:
             system = _cached_system(system)
             messages = _cached_messages(messages)
-        kwargs = dict(model=self.model_id, max_tokens=self.max_tokens,
-                      system=system, tools=tools or [], messages=messages)
+        kwargs: dict[str, Any] = {"model": self.model_id, "max_tokens": self.max_tokens,
+                                  "system": system, "tools": tools or [],
+                                  "messages": messages}
         if self.use_thinking:
             # display:"summarized" — the default is "omitted", which returns empty
             # thinking text (so the 🧠 pane would show nothing).
@@ -191,7 +208,7 @@ class AnthropicModel(Model):
         return kwargs
 
     @staticmethod
-    def _log_cache(usage) -> None:
+    def _log_cache(usage: Any) -> None:
         if usage is None:
             return
         read = getattr(usage, "cache_read_input_tokens", 0) or 0
@@ -200,14 +217,15 @@ class AnthropicModel(Model):
                    read, write, getattr(usage, "input_tokens", 0),
                    getattr(usage, "output_tokens", 0))
 
-    def _client_lazy(self):
+    def _client_lazy(self) -> Any:
         if self._client is None:
             import anthropic  # deferred: keeps the rest of Pixibot import-free
 
             self._client = anthropic.Anthropic()
         return self._client
 
-    def generate(self, *, system, messages, tools) -> ModelResponse:
+    def generate(self, *, system: SystemPrompt, messages: list[Message],
+                 tools: list[ToolDef]) -> ModelResponse:
         """Non-streaming from the caller's view, but streamed on the wire: agents write
         whole source files, so max_tokens is large and a plain create() would risk the
         SDK's ~10-minute HTTP timeout (and the SDK refuses big non-streaming requests)."""
@@ -230,14 +248,15 @@ class AnthropicModel(Model):
         return ModelResponse(text=text, tool_calls=tool_calls,
                              stop_reason=resp.stop_reason, thinking=thinking)
 
-    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+    def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
+                        tools: list[ToolDef],
+                        on_delta: DeltaSink | None = None) -> ModelResponse:
         client = self._client_lazy()
         with client.messages.stream(**self._kwargs(system, messages, tools)) as stream:
             for event in stream:
-                if (event.type == "content_block_delta"
+                if (on_delta and event.type == "content_block_delta"
                         and getattr(event.delta, "type", "") == "text_delta"):
-                    if on_delta:
-                        on_delta(event.delta.text)
+                    on_delta(event.delta.text)
             msg = stream.get_final_message()
         self._log_cache(getattr(msg, "usage", None))
         text = ""
@@ -264,9 +283,9 @@ class OpenAICompatModel(Model):
         self.base_url = base_url
         self.api_key_env = api_key_env
         self.max_tokens = max_tokens
-        self._client = None
+        self._client: Any = None   # the SDK client, built on first use
 
-    def _client_lazy(self):
+    def _client_lazy(self) -> Any:
         if self._client is None:
             import os
 
@@ -276,41 +295,58 @@ class OpenAICompatModel(Model):
 
     # -- Anthropic-shape -> OpenAI-shape ------------------------------------
     @staticmethod
-    def _to_messages(system, messages) -> list[dict]:
-        out: list[dict] = [{"role": "system", "content": system}] if system else []
+    def _assistant_message(content: list[dict[str, Any]]) -> Message:
+        """One assistant turn: text blocks concatenate, tool_use becomes tool_calls."""
+        text, calls = "", []
+        for b in content:
+            if b.get("type") == "text":
+                text += b["text"]
+            elif b.get("type") == "tool_use":
+                calls.append({"id": b["id"], "type": "function",
+                              "function": {"name": b["name"],
+                                           "arguments": json.dumps(b["input"])}})
+        msg: Message = {"role": "assistant", "content": text or None}
+        if calls:
+            msg["tool_calls"] = calls
+        return msg
+
+    @staticmethod
+    def _user_messages(content: list[dict[str, Any]]) -> list[Message]:
+        """One user turn: each tool_result becomes its own role:tool message, and
+        any loose text is appended as a single user message after them."""
+        out: list[Message] = []
+        texts = []
+        for b in content:
+            if b.get("type") == "tool_result":
+                payload = b["content"]
+                out.append({"role": "tool", "tool_call_id": b["tool_use_id"],
+                            "content": payload if isinstance(payload, str)
+                            else json.dumps(payload)})
+            elif b.get("type") == "text":
+                texts.append(b["text"])
+        if texts:
+            out.append({"role": "user", "content": "\n".join(texts)})
+        return out
+
+    @classmethod
+    def _to_messages(cls, system: SystemPrompt, messages: list[Message]) -> list[Message]:
+        """Translate the whole conversation into chat-completions shape."""
+        out: list[Message] = []
+        if system:
+            out.append({"role": "system",
+                        "content": system if isinstance(system, str) else json.dumps(system)})
         for m in messages:
             role, content = m["role"], m["content"]
             if isinstance(content, str):
                 out.append({"role": role, "content": content})
-                continue
-            if role == "assistant":
-                text, calls = "", []
-                for b in content:
-                    if b.get("type") == "text":
-                        text += b["text"]
-                    elif b.get("type") == "tool_use":
-                        calls.append({"id": b["id"], "type": "function",
-                                      "function": {"name": b["name"],
-                                                   "arguments": json.dumps(b["input"])}})
-                msg = {"role": "assistant", "content": text or None}
-                if calls:
-                    msg["tool_calls"] = calls
-                out.append(msg)
-            else:  # user turn: tool_result blocks -> role:tool; text -> user text
-                texts = []
-                for b in content:
-                    if b.get("type") == "tool_result":
-                        c = b["content"]
-                        out.append({"role": "tool", "tool_call_id": b["tool_use_id"],
-                                    "content": c if isinstance(c, str) else json.dumps(c)})
-                    elif b.get("type") == "text":
-                        texts.append(b["text"])
-                if texts:
-                    out.append({"role": "user", "content": "\n".join(texts)})
+            elif role == "assistant":
+                out.append(cls._assistant_message(content))
+            else:
+                out.extend(cls._user_messages(content))
         return out
 
     @staticmethod
-    def _to_tools(tools):
+    def _to_tools(tools: list[ToolDef] | None) -> list[dict[str, Any]] | None:
         if not tools:
             return None
         return [{"type": "function",
@@ -318,9 +354,9 @@ class OpenAICompatModel(Model):
                               "parameters": t["input_schema"]}} for t in tools]
 
     @staticmethod
-    def _parse_message(msg) -> ModelResponse:
+    def _parse_message(msg: Any) -> ModelResponse:
         text = msg.content or ""
-        calls = []
+        calls: list[ToolCall] = []
         for tc in (getattr(msg, "tool_calls", None) or []):
             try:
                 args = json.loads(tc.function.arguments or "{}")
@@ -330,7 +366,8 @@ class OpenAICompatModel(Model):
         return ModelResponse(text=text, tool_calls=calls,
                              stop_reason="tool_use" if calls else "end_turn")
 
-    def generate(self, *, system, messages, tools) -> ModelResponse:
+    def generate(self, *, system: SystemPrompt, messages: list[Message],
+                 tools: list[ToolDef]) -> ModelResponse:
         client = self._client_lazy()
         resp = client.chat.completions.create(
             model=self.model_id, max_tokens=self.max_tokens,
@@ -338,7 +375,9 @@ class OpenAICompatModel(Model):
         )
         return self._parse_message(resp.choices[0].message)
 
-    def stream_generate(self, *, system, messages, tools, on_delta=None) -> ModelResponse:
+    def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
+                        tools: list[ToolDef],
+                        on_delta: DeltaSink | None = None) -> ModelResponse:
         client = self._client_lazy()
         stream = client.chat.completions.create(
             model=self.model_id, max_tokens=self.max_tokens,
@@ -346,7 +385,7 @@ class OpenAICompatModel(Model):
             stream=True,
         )
         text = ""
-        frags: dict[int, dict] = {}
+        frags: dict[int, dict[str, Any]] = {}
         for chunk in stream:
             delta = chunk.choices[0].delta
             if getattr(delta, "content", None):
@@ -361,7 +400,7 @@ class OpenAICompatModel(Model):
                     f["name"] = tc.function.name
                 if tc.function and tc.function.arguments:
                     f["args"] += tc.function.arguments
-        calls = []
+        calls: list[ToolCall] = []
         for i in sorted(frags):
             f = frags[i]
             try:
