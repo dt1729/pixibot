@@ -18,7 +18,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 # ── Event kinds ──────────────────────────────────────────────────────────────
 KIND_ARTIFACT = "artifact"    # a work product written to a section
@@ -87,15 +87,15 @@ class Event:
     ts: str
     kind: str
     from_agent: str
-    to_agent: Optional[str]
-    section: Optional[str]
+    to_agent: str | None
+    section: str | None
     payload: str
-    in_reply_to: Optional[int]
+    in_reply_to: int | None
     urgent: bool
-    meta: Optional[dict]
+    meta: dict[str, Any] | None
 
     @classmethod
-    def _from_row(cls, row: sqlite3.Row) -> "Event":
+    def _from_row(cls, row: sqlite3.Row) -> Event:
         return cls(
             id=row["id"], run_id=row["run_id"], ts=row["ts"], kind=row["kind"],
             from_agent=row["from_agent"], to_agent=row["to_agent"],
@@ -148,7 +148,7 @@ class Blackboard:
             )
             self._db.commit()
 
-    def load_memory(self, agent_id: str) -> Optional[str]:
+    def load_memory(self, agent_id: str) -> str | None:
         """Return an agent's stored transcript for the current run, or None."""
         with self._lock:
             row = self._db.execute(
@@ -158,10 +158,12 @@ class Blackboard:
         return row["transcript"] if row else None
 
     # ── agent registry (mutable) ────────────────────────────────────────────
-    def register_agent(self, agent_id: str, *, role: Optional[str] = None,
-                       depth: Optional[str] = None, model: Optional[str] = None,
-                       scope: Optional[str] = None, state: str = "SPAWNED",
-                       budget: Optional[dict] = None) -> None:
+    def register_agent(  # noqa: PLR0913 - the parameters *are* the agents-table
+            # columns; folding them into a record would push row-building into callers
+            self, agent_id: str, *, role: str | None = None,
+            depth: str | None = None, model: str | None = None,
+            scope: str | None = None, state: str = "SPAWNED",
+            budget: dict[str, Any] | None = None) -> None:
         with self._lock:
             self._db.execute(
                 "INSERT INTO agents(agent_id, role, depth, model, scope, state, budget) "
@@ -183,7 +185,7 @@ class Blackboard:
             self._db.execute("UPDATE agents SET state=? WHERE agent_id=?", (state, agent_id))
             self._db.commit()
 
-    def get_agent(self, agent_id: str) -> Optional[dict]:
+    def get_agent(self, agent_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._db.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if not row:
@@ -193,7 +195,7 @@ class Blackboard:
             agent["budget"] = json.loads(agent["budget"])
         return agent
 
-    def list_agents(self) -> list[dict]:
+    def list_agents(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute(
                 "SELECT agent_id, role, depth, model, scope, state FROM agents ORDER BY agent_id"
@@ -208,10 +210,11 @@ class Blackboard:
         return int(row["m"])
 
     # ── writing (append-only) ───────────────────────────────────────────────
-    def send(self, from_agent: str, payload: Any, *, to: Optional[str] = None,
-             kind: str = KIND_MESSAGE, section: Optional[str] = None,
-             in_reply_to: Optional[int] = None, urgent: bool = False,
-             meta: Optional[dict] = None, enforce_scope: bool = True) -> int:
+    def send(  # noqa: PLR0913 - the parameters *are* the events-table columns
+             self, from_agent: str, payload: Any, *, to: str | None = None,
+             kind: str = KIND_MESSAGE, section: str | None = None,
+             in_reply_to: int | None = None, urgent: bool = False,
+             meta: dict[str, Any] | None = None, enforce_scope: bool = True) -> int:
         """Append one event; return its id. Artifact writes require a ``section``
         and are checked against the sender's ``scope`` (scope-as-write-lock)."""
         if kind not in VALID_KINDS:
@@ -232,7 +235,9 @@ class Blackboard:
                  json.dumps(meta) if meta is not None else None),
             )
             self._db.commit()
-            return int(cur.lastrowid)
+            if cur.lastrowid is None:  # pragma: no cover - sqlite always sets it on INSERT
+                raise RuntimeError("insert produced no row id")
+            return cur.lastrowid
 
     def _check_scope(self, agent_id: str, section: str) -> None:
         agent = self.get_agent(agent_id)
@@ -268,7 +273,7 @@ class Blackboard:
                 self._db.commit()
         return events
 
-    def read_section(self, section: str) -> Optional[Event]:
+    def read_section(self, section: str) -> Event | None:
         with self._lock:
             row = self._db.execute(
                 "SELECT * FROM events WHERE section=? AND kind=? AND run_id=? "
@@ -290,8 +295,8 @@ class Blackboard:
                 state[e.section] = e
         return state
 
-    def history(self, *, to_agent: Optional[str] = None, from_agent: Optional[str] = None,
-                kind: Optional[str] = None) -> list[Event]:
+    def history(self, *, to_agent: str | None = None, from_agent: str | None = None,
+                kind: str | None = None) -> list[Event]:
         query = "SELECT * FROM events WHERE run_id=?"
         args: list[Any] = [self.run_id]
         if to_agent is not None:

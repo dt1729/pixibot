@@ -89,7 +89,7 @@ class CommandInput(Input):
         self.value = "" if self._hidx == len(self.history) else self.history[self._hidx]
         self.cursor_position = len(self.value)
 
-    async def _on_key(self, event) -> None:  # noqa: C901 - a small key router
+    async def _on_key(self, event) -> None:
         k = event.key
         if k == "up":
             event.stop(); event.prevent_default(); self._recall(-1); return

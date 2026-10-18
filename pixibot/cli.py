@@ -139,7 +139,7 @@ class ChatSession:
         head = f"provider: {self.provider_name}   agents: {len(agents)}   files: {len(files)}"
         if not agents and not files:
             return head + "\n(no build yet — run: build <objective>)"
-        rows = [f"  {a['agent_id']:18} {str(a.get('role')):11} {a.get('state')}" for a in agents]
+        rows = [f"  {a['agent_id']:18} {a.get('role')!s:11} {a.get('state')}" for a in agents]
         return head + "\n" + "\n".join(rows)
 
     # ── build / steer ─────────────────────────────────────────────────────────

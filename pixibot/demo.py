@@ -8,13 +8,20 @@ All offline (MockModel) — no API key needed.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
+from pathlib import Path
 
 from . import intake, mockrun
 from .blackboard import Blackboard
 from .engine import Engine
 from .interaction import Broker
+
+
+def _payload(bb: Blackboard, section: str) -> str:
+    ev = bb.read_section(section)
+    return ev.payload if ev else "(none)"
 
 
 def _hr(title: str) -> None:
@@ -35,7 +42,8 @@ def main() -> None:
     res = engine.build_objective(objective)
     print("agents:", [a["id"] for a in res["projection"]["agents"]], " steps:", res["steps"])
     print("workspace:", res["workspace"])
-    print("files written to disk:", engine.workspace.list_files())
+    ws = engine.workspace
+    print("files written to disk:", ws.list_files() if ws else "(none)")
     for section in ("topology", "impl/f1", "tests/f1"):
         ev = bb.read_section(section)
         print(f"  {section}: {ev.payload if ev else '(none)'}")
@@ -47,8 +55,8 @@ def main() -> None:
     _hr("4) Steer: /tell prog-f1 'use a dataclass'  (non-blocking; agent resumes)")
     steps = engine.tell("prog-f1", "use a dataclass")
     print(f"resumed {steps} step(s)")
-    print("  impl/f1  ->", bb.read_section("impl/f1").payload)
-    print("  tests/f1 ->", bb.read_section("tests/f1").payload, "(tester re-ran automatically)")
+    print("  impl/f1  ->", _payload(bb, "impl/f1"))
+    print("  tests/f1 ->", _payload(bb, "tests/f1"), "(tester re-ran automatically)")
 
     _hr("5) Revise from demo feedback: 'add API docs'  (TPM adds a new agent)")
     steps = engine.revise("add API docs")
@@ -61,10 +69,8 @@ def main() -> None:
 
     bb.close()
     for s in ("", "-wal", "-shm"):
-        try:
-            os.unlink(path + s)
-        except FileNotFoundError:
-            pass
+        with contextlib.suppress(FileNotFoundError):
+            Path(path + s).unlink()
 
 
 if __name__ == "__main__":

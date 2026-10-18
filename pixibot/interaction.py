@@ -12,7 +12,8 @@ event to the agent's inbox, which the agent consumes at its next step
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .blackboard import KIND_DIRECTIVE, Blackboard
 from .model import Model
@@ -62,9 +63,9 @@ def _spokesbot_system(agent_id: str, snap: str) -> str:
 PROJECT_TARGETS = {"tpm", "project", "overseer", "orchestrator"}
 
 
-def latest_reports(bb: Blackboard) -> dict:
+def latest_reports(bb: Blackboard) -> dict[str, str]:
     """agent_id -> its most recent completion report (the summary it posted to tpm)."""
-    reports: dict = {}
+    reports: dict[str, str] = {}
     for e in bb.history(to_agent="tpm"):
         if e.kind == "message" and e.from_agent not in ("context-manager", "user"):
             reports[e.from_agent] = e.payload
@@ -119,18 +120,19 @@ def _project_system(snap: str) -> str:
 
 
 # spokesbot_factory() -> Model | None  (None => offline mode: show context only)
-SpokesbotFactory = Callable[[], Optional[Model]]
+SpokesbotFactory = Callable[[], Model | None]
 
 
 class Broker:
     """Read-only conversational access to agents, plus non-blocking steering."""
 
-    def __init__(self, bb: Blackboard, spokesbot_factory: Optional[SpokesbotFactory] = None):
+    def __init__(self, bb: Blackboard, spokesbot_factory: SpokesbotFactory | None = None):
         self.bb = bb
         self._factory = spokesbot_factory or (lambda: None)
-        self._history: dict[str, list[dict]] = {}  # per-agent chat history
+        self._history: dict[str, list[dict[str, Any]]] = {}  # per-agent chat history
 
-    def talk(self, agent_id: str, message: str, on_delta=None) -> str:
+    def talk(self, agent_id: str, message: str,
+             on_delta: Callable[[str], None] | None = None) -> str:
         """Ask the agent's spokesbot a question. Read-only; never pauses the agent.
 
         Pass ``on_delta`` to stream the reply token-by-token (live mode).

@@ -9,6 +9,9 @@ contract is injected so the quality bar is always present.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 from .agent import ReasoningAgent
 from .model import Model
 from .standards import standards_contract
@@ -47,11 +50,13 @@ ROLE_BRIEFS = {
         "ROLE: Test designer (spec-blind).\n"
         "Design the test suite from the acceptance criteria and the architecture's DECLARED "
         "INTERFACES only — read ARCHITECTURE.md and your input, NEVER the implementation. Your "
-        "tests must encode what the software SHOULD do, not what it happens to do; attempts to "
-        "read implementation files are refused by the harness. Write real test files with "
-        "write_artifact (e.g. section='tests/test_<feature>.py') covering the public interface, "
+        "tests must encode what the software SHOULD do, not what it happens to do; attempts "
+        "to read implementation files are refused by the harness. Write real test files with "
+        "write_artifact (e.g. section='tests/test_<feature>.py') covering the public "
+        "interface, "
         "integration points, and error paths. Do NOT write production code. Your turn is not "
-        "done until the test files exist — a separate tester runs them against the implementation.\n"
+        "done until the test files exist — a separate tester runs them"
+        "against the implementation.\n"
         "STAY IN YOUR LANE: do NOT exhaustively validate your expectations by running real tools "
         "(ffmpeg, Qt, subprocess probes) — a couple of orienting checks at most, then WRITE THE "
         "TESTS. Deep empirical R&D burns your token budget (and can blow the output limit); "
@@ -62,7 +67,8 @@ ROLE_BRIEFS = {
         "Read the architecture and any design files first (read_file / list_files). Then write "
         "clean, correct, runnable code to the file paths the architecture specifies. "
         "Requirements:\n"
-        "  • correct algorithms and sound data structures; handle the edge cases the design calls out;\n"
+        "  • correct algorithms and sound data structures; handle the edge cases"
+        "  the design calls out;\n"
         "  • no premature abstraction — implement exactly what's needed, well;\n"
         "  • follow the interfaces/handshakes exactly so other features integrate;\n"
         "  • idiomatic, readable code with docstrings on public functions.\n"
@@ -128,7 +134,8 @@ DEPTH_BRIEFS = {
 _WORKFLOW = (
     "WORKFLOW: You work in a shared filesystem workspace alongside other agents.\n"
     "  • list_files() to see the project; read_file(path) to read anything earlier agents wrote.\n"
-    "  • write_artifact(section=<file path>, content=<full contents>) to create or replace a file.\n"
+    "  • write_artifact(section=<file path>, content=<full contents>) to create or"
+    "    replace a file.\n"
     "  • run_bash(command) to run code or tests inside the workspace.\n"
     "  • send_message(to=<agent id>, content=...) to ask or escalate to a specific peer.\n"
     "SELF-CORRECTION: the team is not a one-way pipeline. Sending a message to an agent — even "
@@ -159,7 +166,8 @@ def build_system_prompt(role: str, depth: str) -> str:
 
 
 def make_agent(agent_id: str, *, role: str, depth: str, model: Model,
-               scope=None, reads=(), **kwargs) -> ReasoningAgent:
+               scope: str | None = None, reads: Iterable[str] = (),
+               **kwargs: Any) -> ReasoningAgent:
     return ReasoningAgent(
         agent_id, model,
         system_prompt=build_system_prompt(role, depth),

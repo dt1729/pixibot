@@ -8,7 +8,7 @@ validation errors until it validates or the attempt budget is spent.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from .model import Model
 from .schema import obtain_valid, validate_projection
@@ -44,7 +44,7 @@ def _parse_json(text: str) -> Any:
     return json.loads(text[start:end + 1])
 
 
-def _prompt(inp: dict, errors: list[str]) -> str:
+def _prompt(inp: dict[str, Any], errors: list[str]) -> str:
     msg = "Produce the projection JSON for this request:\n" + json.dumps(inp, indent=2)
     if errors:
         msg += ("\n\nYour previous attempt was invalid. Fix exactly these errors "
@@ -52,7 +52,7 @@ def _prompt(inp: dict, errors: list[str]) -> str:
     return msg
 
 
-def plan(inp: dict, model: Model, *, max_repairs: int = 3) -> dict:
+def plan(inp: dict[str, Any], model: Model, *, max_repairs: int = 3) -> dict[str, Any]:
     def generate(errors: list[str]) -> Any:
         resp = model.generate(
             system=TPM_SYSTEM,
@@ -61,7 +61,8 @@ def plan(inp: dict, model: Model, *, max_repairs: int = 3) -> dict:
         )
         return _parse_json(resp.text)
 
-    return obtain_valid(generate, validate_projection, max_attempts=max_repairs)
+    return cast("dict[str, Any]",
+                obtain_valid(generate, validate_projection, max_attempts=max_repairs))
 
 
 REVISE_SYSTEM = TPM_SYSTEM + (
@@ -74,7 +75,8 @@ REVISE_SYSTEM = TPM_SYSTEM + (
 )
 
 
-def revise(prior: dict, feedback: str, model: Model, *, max_repairs: int = 3) -> dict:
+def revise(prior: dict[str, Any], feedback: str, model: Model, *,
+           max_repairs: int = 3) -> dict[str, Any]:
     """Re-plan from a prior projection + demo feedback (DESIGN.md §15 revision)."""
     def _revise_prompt(errors: list[str]) -> str:
         msg = ("Revise this projection based on the feedback. Return the full "
@@ -92,4 +94,6 @@ def revise(prior: dict, feedback: str, model: Model, *, max_repairs: int = 3) ->
         )
         return _parse_json(resp.text)
 
-    return obtain_valid(generate, validate_projection, max_attempts=max_repairs)
+    return cast("dict[str, Any]",
+                obtain_valid(generate, validate_projection,
+                             max_attempts=max_repairs))

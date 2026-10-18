@@ -1,6 +1,5 @@
 """Unit tests for the context-manager scheduler (stdlib only, mock runners)."""
 
-import json
 import os
 import tempfile
 import unittest

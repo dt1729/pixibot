@@ -9,7 +9,7 @@ reliably participates even when the model's plan is loose.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .blackboard import Blackboard
 from .context_manager import ContextManager

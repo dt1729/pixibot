@@ -56,9 +56,9 @@ class Spinner:
     def __init__(self, text: str = "working"):
         self.text = text
         self._stop = threading.Event()
-        self._thread = None
+        self._thread: threading.Thread | None = None
 
-    def __enter__(self) -> "Spinner":
+    def __enter__(self) -> Spinner:
         if _ENABLED:
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
@@ -71,7 +71,7 @@ class Spinner:
             write(f"\r{c(ch, 'cyan')} {c(self.text, 'dim')} ")
             time.sleep(0.08)
 
-    def __exit__(self, *exc) -> None:
+    def __exit__(self, *exc: object) -> None:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=0.3)

@@ -1,0 +1,28 @@
+# Mechanical gates, run before every commit. These are the same checks the
+# checkpoint gate runs on agent output (DESIGN.md §10): the harness is held to
+# the standard it enforces.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+        args: [--check]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.9.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-requests]
+        pass_filenames: false
+        args: [pixibot]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python3 -m pytest -q
+        language: system
+        pass_filenames: false
+        types: [python]

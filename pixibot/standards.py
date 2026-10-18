@@ -6,9 +6,9 @@ always present; the full markdown docs in ``standards/`` are read on demand.
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
-_STD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "standards")
+_STD_DIR = Path(__file__).resolve().parent.parent / "standards"
 
 
 def standards_contract() -> str:
@@ -24,11 +24,10 @@ def standards_contract() -> str:
 
 def load_standard(name: str) -> str:
     """Read a full standard doc on demand, e.g. load_standard('lld.md')."""
-    with open(os.path.join(_STD_DIR, name), encoding="utf-8") as f:
-        return f.read()
+    return (_STD_DIR / name).read_text(encoding="utf-8")
 
 
 def available_standards() -> list[str]:
-    if not os.path.isdir(_STD_DIR):
+    if not _STD_DIR.is_dir():
         return []
-    return sorted(n for n in os.listdir(_STD_DIR) if n.endswith(".md"))
+    return sorted(p.name for p in _STD_DIR.iterdir() if p.suffix == ".md")

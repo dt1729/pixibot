@@ -14,7 +14,8 @@ directive, a revision) arrive.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from .blackboard import KIND_ARTIFACT, Blackboard, Event
 from .logbook import get as _get_logger
@@ -22,7 +23,10 @@ from .logbook import get as _get_logger
 _log = _get_logger("cm")
 
 # runner(bb, agent_id, events) -> terminal lifecycle state (defaults to DONE)
-AgentRunner = Callable[[Blackboard, str, list[Event]], Optional[str]]
+AgentRunner = Callable[[Blackboard, str, list[Event]], str | None]
+# on_agent_start(agent_id); on_activation(agent_id, terminal_state, sections_written)
+StartHook = Callable[[str], None]
+ActivationHook = Callable[[str, str, list[str | None]], None]
 
 STATE_SPAWNED = "SPAWNED"
 STATE_ACTIVE = "ACTIVE"
@@ -41,14 +45,14 @@ class ContextManager:
         self._runners: dict[str, AgentRunner] = {}
         self._readers: list[tuple[str, str]] = []          # (section_pattern, reader_id)
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
-        self._deps: dict[str, set] = {}                    # agent_id -> set of agent_ids it needs
+        self._deps: dict[str, set[str]] = {}               # agent_id -> agent_ids it needs
         self._done: set[str] = set()                       # agents that have completed
         # Optional live-progress hooks.
-        self.on_activation = None       # on_activation(agent_id, terminal_state, wrote_sections)
-        self.on_agent_start = None      # on_agent_start(agent_id)
+        self.on_activation: ActivationHook | None = None
+        self.on_agent_start: StartHook | None = None
 
     # -- registration --------------------------------------------------------
-    def register(self, agent_id: str, runner: AgentRunner, **agent_kwargs) -> None:
+    def register(self, agent_id: str, runner: AgentRunner, **agent_kwargs: Any) -> None:
         self.bb.register_agent(agent_id, **agent_kwargs)
         self._runners[agent_id] = runner
 
@@ -59,17 +63,17 @@ class ContextManager:
         """Reader activates when an artifact is written to a matching section."""
         self._readers.append((section_pattern, reader_agent_id))
 
-    def set_deps(self, agent_id: str, deps) -> None:
+    def set_deps(self, agent_id: str, deps: Iterable[str]) -> None:
         """Declare that `agent_id` runs only after all `deps` agents have completed."""
         self._deps[agent_id] = set(deps)
 
     # -- dependency routing --------------------------------------------------
     @staticmethod
-    def _matches(section: Optional[str], pattern: str) -> bool:
+    def _matches(section: str | None, pattern: str) -> bool:
         if section is None:
             return False
         p = pattern.rstrip("/")
-        return section == pattern or section == p or section.startswith(p + "/")
+        return section in (pattern, p) or section.startswith(p + "/")
 
     def _route_new_artifacts(self, author_id: str, since_id: int) -> None:
         for e in self.bb.history(from_agent=author_id):
@@ -97,7 +101,7 @@ class ContextManager:
                 self.on_agent_start(agent_id)
             try:
                 terminal = runner(self.bb, agent_id, events) or STATE_DONE
-            except Exception:  # a crashing agent must not hang or kill the whole run
+            except Exception:  # noqa: BLE001 - a crashing agent must not kill the run
                 _log.exception("runner for %s crashed", agent_id)
                 terminal = STATE_BLOCKED
             self.bb.set_state(agent_id, terminal)

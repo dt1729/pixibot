@@ -1,0 +1,116 @@
+# Pixibot — packaging plus the *mechanical* half of its coding standards.
+#
+# Decision 22 in DESIGN.md splits standards into judgment (prose, injected into agents)
+# and mechanical (tools, enforced on the harness itself). This file is the mechanical
+# half: every rule a tool can decide lives here, named once, and is never restated in
+# prose. `standards/` keeps only what a linter cannot check.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pixibot"
+version = "0.0.1"
+description = "A dynamic multi-agent software-development system"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Divya Tiwari" }]
+dependencies = [
+    "anthropic>=0.40",   # native provider
+]
+
+[project.optional-dependencies]
+# OpenAI-compatible providers (Gemini, OpenRouter, Groq, local Ollama).
+compat = ["openai>=1.40"]
+# The split-pane TUI; the plain shell works without it.
+tui = ["textual>=0.80"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.9", "pre-commit>=3.7"]
+
+[project.scripts]
+pixibot = "pixibot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pixibot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# ── Lint ─────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes: undefined names, unused imports
+    "E", "W", # pycodestyle
+    "I",      # import sorting
+    "N",      # pep8 naming
+    "UP",     # pyupgrade: modern syntax for the target version
+    "B",      # bugbear: mutable defaults, loop capture
+    "A",      # builtin shadowing
+    "C4",     # comprehension clarity
+    "SIM",    # simplifiable constructs
+    "RET",    # return-path clarity
+    "ARG",    # unused arguments
+    "PTH",    # pathlib over os.path
+    "TRY",    # exception antipatterns
+    "BLE",    # blind except
+    "FBT",    # boolean positional arguments
+    "ANN",    # missing annotations
+    "C90",    # mccabe complexity
+    "PL",     # pylint: argument/statement/branch counts
+    "RUF",
+]
+ignore = [
+    "ANN401",  # Any is the honest annotation at the model/tool boundary
+    "TRY003",  # long messages in raise: our error strings are read by agents, so they
+               # are part of the interface
+    "PLR2004", # magic value comparison: too noisy to be worth the churn
+    "PLC0415", # import-outside-top-level: provider SDKs (anthropic/openai) and textual
+               # are optional extras, imported lazily *by design* so a missing extra
+               # costs a feature, not the process. See providers.py.
+]
+
+# The mechanical half of "split on reasons to change". Where a seam goes stays a
+# judgment call (standards/lld.md); these only say when to stop and look.
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 6
+max-branches = 12
+max-statements = 50
+max-returns = 8
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+suppress-none-returning = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on literals, take fixtures untyped by design, and embed source text
+# whose line breaks are part of what is under test.
+"tests/**" = ["ANN", "PLR2004", "ARG", "E501", "FBT003", "PLC0415"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── Types ────────────────────────────────────────────────────────────────────
+# Strict everywhere, with an explicit ledger of modules not yet converted (below).
+# The ledger is the point: a module leaves it when it is typed, and the list shrinking
+# is the visible progress. Nothing is silently exempt.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+files = ["pixibot"]
+
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "openai.*", "textual.*", "pytest.*"]
+ignore_missing_imports = true

@@ -8,8 +8,10 @@ resume, revision) can be exercised deterministically without an API key.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any
 
-from .model import MockModel, ModelResponse, ToolCall
+from .model import MockModel, Model, ModelResponse, ToolCall
 
 
 def _w(section: str, content: str) -> ModelResponse:
@@ -22,7 +24,7 @@ def _w(section: str, content: str) -> ModelResponse:
 _END = ModelResponse(text="done", stop_reason="end_turn")
 
 
-def build_projection(objective: str = "the requested feature") -> dict:
+def build_projection(objective: str = "the requested feature") -> dict[str, Any]:
     return {
         "plan_summary": f"Plan for: {objective}",
         "breakdown": [{"id": "f1", "desc": objective, "depends_on": []}],
@@ -33,16 +35,19 @@ def build_projection(objective: str = "the requested feature") -> dict:
              "blackboard": {"reads": [], "writes": ["topology"]}, "activates_on": "message"},
             {"id": "prog-f1", "role": "programmer",
              "budget": {"compute": 40000, "depth": "senior", "scope": "impl/f1"},
-             "blackboard": {"reads": ["topology"], "writes": ["impl/f1"]}, "activates_on": "message"},
+             "blackboard": {"reads": ["topology"], "writes": ["impl/f1"]},
+             "activates_on": "message"},
             {"id": "test-f1", "role": "tester",
              "budget": {"compute": 40000, "depth": "senior", "scope": "tests/f1"},
-             "blackboard": {"reads": ["impl/f1"], "writes": ["tests/f1"]}, "activates_on": "message"},
+             "blackboard": {"reads": ["impl/f1"], "writes": ["tests/f1"]},
+             "activates_on": "message"},
         ],
-        "checkpoints": [{"id": "cp1", "after": ["test-f1"], "demo": "run tests", "gate": "user_feedback"}],
+        "checkpoints": [{"id": "cp1", "after": ["test-f1"], "demo": "run tests",
+                         "gate": "user_feedback"}],
     }
 
 
-def revised_projection(objective: str = "the requested feature") -> dict:
+def revised_projection(objective: str = "the requested feature") -> dict[str, Any]:
     proj = build_projection(objective)
     proj["plan_summary"] = f"(revised) {objective}"
     proj["agents"].append(
@@ -61,7 +66,7 @@ def mock_tpm_model(objective: str = "the requested feature") -> MockModel:
     ])
 
 
-def mock_model_factory():
+def mock_model_factory() -> Callable[[dict[str, Any]], Model]:
     scripts = {
         "topo": [_w("topology", "microservices: api gateway + key/value store"), _END],
         "prog-f1": [
@@ -75,6 +80,6 @@ def mock_model_factory():
         "docs-f1": [_w("docs/f1", "# API docs\nPOST /shorten -> {code}"), _END],
     }
 
-    def factory(spec: dict) -> MockModel:
+    def factory(spec: dict[str, Any]) -> MockModel:
         return MockModel(list(scripts.get(spec["id"], [_END])))
     return factory

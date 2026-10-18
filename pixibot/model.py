@@ -15,8 +15,9 @@ details it doesn't need.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Union
+from typing import Union
 
 
 @dataclass
@@ -164,7 +165,7 @@ def _cached_messages(messages):
 class AnthropicModel(Model):
     """Calls real Claude. The SDK import is deferred to first use."""
 
-    def __init__(self, model_id: str, *, effort: "str | None" = "high",
+    def __init__(self, model_id: str, *, effort: str | None = "high",
                  max_tokens: int = 32000, use_thinking: bool = True, use_cache: bool = True):
         self.model_id = model_id
         self.effort = effort

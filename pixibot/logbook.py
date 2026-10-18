@@ -10,27 +10,30 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
-DEFAULT_PATH = os.path.expanduser("~/.pixibot/pixibot.log")
-_CONFIGURED = False
+DEFAULT_PATH = str(Path("~/.pixibot/pixibot.log").expanduser())
+
+_HANDLER_TAG = "pixibot-run-log"  # marks our handler, so setup stays idempotent
+                                  # without module-level mutable state
 
 
 def setup(path: str | None = None, level: int = logging.INFO) -> str:
     """Attach a file handler to the 'pixibot' logger. Idempotent. Returns the path."""
-    global _CONFIGURED
-    path = path or DEFAULT_PATH
+    target = path or DEFAULT_PATH
     logger = logging.getLogger("pixibot")
     logger.setLevel(level)
-    if not _CONFIGURED:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        handler = logging.FileHandler(path, encoding="utf-8")
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)-5s %(name)s: %(message)s", "%H:%M:%S"))
-        logger.addHandler(handler)
-        logger.propagate = False  # don't spam the TUI/stdout
-        _CONFIGURED = True
-        logger.info("──────── pixibot log start (pid %d) ────────", os.getpid())
-    return path
+    if any(getattr(h, "name", None) == _HANDLER_TAG for h in logger.handlers):
+        return target
+    Path(target).parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(target, encoding="utf-8")
+    handler.name = _HANDLER_TAG
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-5s %(name)s: %(message)s", "%H:%M:%S"))
+    logger.addHandler(handler)
+    logger.propagate = False  # don't spam the TUI/stdout
+    logger.info("──────── pixibot log start (pid %d) ────────", os.getpid())
+    return target
 
 
 def get(name: str = "") -> logging.Logger:

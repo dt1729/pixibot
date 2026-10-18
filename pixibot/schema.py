@@ -9,12 +9,19 @@ until it produces something valid or the budget is exhausted.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 DEPTHS = {"junior", "senior", "principal"}
 
 
-def _require(obj: dict, key: str, typ, errors: list[str], path: str):
+def _require(
+    obj: dict[str, Any],
+    key: str,
+    typ: type | tuple[type, ...] | None,
+    errors: list[str],
+    path: str,
+) -> Any:
     if key not in obj:
         errors.append(f"{path}: missing '{key}'")
         return None
@@ -82,7 +89,7 @@ def validate_projection(proj: Any) -> list[str]:
     return errors
 
 
-class ValidationFailed(Exception):
+class ValidationFailed(Exception):  # noqa: N818 - reads as the failure, not a thing
     """Raised when the repair loop exhausts its attempts."""
 
     def __init__(self, errors: list[str]):

@@ -9,6 +9,7 @@ also satisfies the "give the full spec up front" rule for hard development).
 from __future__ import annotations
 
 import re
+from typing import Any
 
 FORM_TEMPLATE = """# Pixibot Build Request
 
@@ -50,7 +51,7 @@ def render_form() -> str:
     return FORM_TEMPLATE
 
 
-def _sections(md: str) -> dict:
+def _sections(md: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for chunk in re.split(r"^##\s+", md, flags=re.M)[1:]:
         head, _, body = chunk.partition("\n")
@@ -69,8 +70,8 @@ def _bullets(body: str) -> list[str]:
     return [i for i in items if i and not i.startswith("<") and i.lower() != "none"]
 
 
-def _kv(body: str) -> dict:
-    d = {}
+def _kv(body: str) -> dict[str, str]:
+    d: dict[str, str] = {}
     for ln in body.splitlines():
         m = re.match(r"^[-*]?\s*([A-Za-z ]+):\s*(.+)$", ln)
         if m:
@@ -83,7 +84,7 @@ def _num(v: str, default: int = 200000) -> int:
     return int(m.group()) if m else default
 
 
-def parse_form(md: str) -> dict:
+def parse_form(md: str) -> dict[str, Any]:
     s = _sections(md)
     obj_first = (s.get("objective", "").splitlines() or [""])[0]
     target = _kv(s.get("target", ""))

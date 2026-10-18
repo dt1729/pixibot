@@ -7,7 +7,7 @@ wire real Claude (needs ``ANTHROPIC_API_KEY`` and the ``anthropic`` package).
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from . import config, observer, orchestrator, tpm
 from .blackboard import Blackboard

@@ -11,7 +11,6 @@ Its ``runner`` method plugs directly into ``ContextManager``.
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from .blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
 from .logbook import get as _get_logger
@@ -29,12 +28,12 @@ class ReasoningAgent:
         model: Model,
         *,
         system_prompt: str = "",
-        role: Optional[str] = None,
-        depth: Optional[str] = None,
-        scope: Optional[str] = None,
+        role: str | None = None,
+        depth: str | None = None,
+        scope: str | None = None,
         reads: tuple[str, ...] = (),
-        tool_defs: Optional[list[dict]] = None,
-        tool_impls: Optional[dict] = None,
+        tool_defs: list[dict] | None = None,
+        tool_impls: dict | None = None,
         max_iters: int = 14,
         workspace=None,
         on_event=None,

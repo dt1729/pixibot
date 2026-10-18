@@ -9,17 +9,21 @@ splices in any new agents.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from . import gates, observer, orchestrator, tpm
 from .blackboard import KIND_DIRECTIVE, Blackboard
-from .context_manager import ContextManager
+from .context_manager import ActivationHook, ContextManager, StartHook
 from .logbook import get as _get_logger
 from .model import Model
+from .workspace import Workspace
 
 _log = _get_logger("engine")
 
-ModelFactory = Callable[[dict], Model]
+ModelFactory = Callable[[dict[str, Any]], Model]
+# on_event(agent_id, kind, detail) - per-agent activity feed for the live panes
+EventHook = Callable[[str, str, str], None]
 
 # Greenfield-topology adoptions, each an on/off ablation arm.
 ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
@@ -48,13 +52,13 @@ class Engine:
         self.tpm_model = tpm_model
         self.model_factory = model_factory
         self.max_steps = max_steps
-        self.cm: Optional[ContextManager] = None
-        self.projection: Optional[dict] = None
-        self.on_activation = None  # live-progress hook (agent finished)
-        self.on_agent_start = None  # live-progress hook (agent started)
-        self.on_event = None       # per-agent activity feed on_event(agent_id, kind, detail)
-        self.workspace = None      # real project dir; created per build
-        self.workspace_base = None # parent dir for per-run workspaces (defaults to ~/pixibot-workspace)
+        self.cm: ContextManager | None = None
+        self.projection: dict | None = None
+        self.on_activation: ActivationHook | None = None   # agent finished
+        self.on_agent_start: StartHook | None = None       # agent started
+        self.on_event: EventHook | None = None             # per-agent activity feed
+        self.workspace: Workspace | None = None            # real project dir, per build
+        self.workspace_base: str | None = None             # parent dir for workspaces
         self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
         self.last_gate = None      # (passed, [CheckResult]) from the most recent gate
