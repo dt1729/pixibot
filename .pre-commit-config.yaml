@@ -35,6 +35,13 @@ repos:
         types: [python]
         pass_filenames: false
 
+      - id: contracts
+        name: contracts (every public module, every required section)
+        entry: python3 scripts/check_contracts.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       - id: pytest
         name: pytest
         entry: python3 -m pytest -q

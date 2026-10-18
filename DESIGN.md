@@ -491,45 +491,114 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
 46. **Prompt caching (M26):** `AnthropicModel` adds two 1-hour cache breakpoints — one on system+tools, a rolling one on the latest turn — so the growing stateful transcript is re-read at ~0.1× input cost; markers are applied to a copy (never persisted, so they can't exceed the 4-breakpoint cap); thinking `display` set to `summarized` so it actually renders.
 47. **Greenfield topologies (M27):** the research adoptions land as **toggleable ablation arms** (`Engine.features`): (A) continuous testing — a reader re-activates on every write to a section it reads; (B) a spec-blind **test-designer** role (AgentCoder split); (C) a bounded review dyad with confidence-gated routing (ChatDev/UA-ChatDev); (D) mechanical test-designer **blindness** (a `read_denylist` refuses implementation paths); (E) failure-driven **auto-replan** — the checkpoint gate runs `pytest` after a build and, on failure, re-invokes the TPM (bounded).
 48. **Message-shape hardening + cost defaults (M28–M30):** three real crashes from the stateful-transcript ↔ live-API seam were fixed — empty text blocks, dangling `tool_use` (tools now always run before a stop such as `max_tokens`), and binary files read as UTF-8 — with a defensive sanitizer in `AnthropicModel`. `auto_gate` is now **off by default** (its re-plan loop is the biggest cost multiplier); the test-designer charter forbids exhaustive empirical R&D that blows the output budget.
+49. **Mechanical standards floor (M34):** decision 22 split standards into judgment and
+    mechanical, but only the judgment half existed. `pyproject.toml` now carries the
+    mechanical half — ruff (complexity 10, max-args 6, annotations required, pathlib,
+    no blind except), `mypy --strict`, pytest — and `.pre-commit-config.yaml` runs them
+    plus `lint-imports` and the contract check before every commit. `standards/*.md`
+    keeps only what a tool cannot decide. The harness is held to the bar it enforces.
+50. **Design before implementation, in writing (M35+):** every module has a contract in
+    `docs/contracts/` stating responsibility, interface, seam, dependency directions,
+    error modes, logging and tests — plus what was *rejected* and the deletion test.
+    `scripts/check_contracts.py` fails the commit if a public module has none or a
+    contract is missing a section. 21 contracts; the structure is checked, the content is
+    the author's responsibility.
+51. **One provider module (M35):** provider knowledge had spread to 31 public names across
+    `config.py`, `run.py` and `cli.py`. It is now one frozen `_Profile` table and five
+    public names in `providers.py`; adding a provider is one table entry. `config.py` is
+    deleted — every line in it was provider-model policy. Nothing reads a key or builds a
+    client until a model is called, which is what makes the provider tests key-free.
+52. **An agent is one config over one loop, literally (M36):** `AgentSpec` (who an agent
+    is), `RunContext` (what every agent in a run shares: workspace, objective, activity
+    feed) and `Toolset` (how it acts) replace a 13-argument constructor and a three-value
+    parameter thread through engine → materialize → register_one → factory → agent.
+    §1 said this from the start; the code now says it too.
+53. **One executor seam for agents and the gate (M37):** decision 24's "Docker per run" was
+    unwired — `DockerExecutor` existed and nothing built it. `runtime.executor_for(workdir,
+    sandbox=auto|docker|local)` is now the single choice: a container per command (mounting
+    only the workspace, no host environment, no network) or a confined host subprocess.
+    `"docker"` refuses to pretend when no daemon answers; `"auto"` downgrades with a
+    WARNING, because a missing daemon should cost isolation, not the run. The workspace and
+    the gate share one executor, so the gate runs where the agents ran.
+54. **The gate derives its own checks, in two languages (M37):** the engine used to decide
+    them with a filename heuristic, so C/C++ — half of Pixibot's stated targets (§6) —
+    reached the human checkpoint with nothing compiled. `gates.checks_for(files)` is a pure
+    function: pytest for Python, configure/build/ctest for CMake, `make` (plus `make test`
+    when declared) or a compile pass for bare C/C++, both for a mixed project. Every
+    derived check runs even after one fails, because a broken build *and* a red suite is
+    better re-plan feedback than the first failure alone.
+55. **Human checkpoints, mechanical gate first (M39):** decision 12 is implemented.
+    `Engine.build(inp, reviewer=...)` walks the projection's due checkpoints; the
+    mechanical gate runs first and a red gate never reaches a person (decision 33), its
+    failures going back to the team instead; a green gate shows the TPM's demo and takes a
+    verdict — accept, or feedback that re-plans and asks again, bounded. Without a reviewer
+    the build is unattended exactly as before. `pixibot --review` installs the terminal
+    reviewer, and only when stdin is a TTY.
+56. **Measure the arms (M40):** the adoptions were built as toggles so they could be
+    compared, and nothing compared them. `pixibot.benchmark` runs a task list against a
+    2×2 ablation (bare · continuous testing · auto-gate · both) and judges by the
+    mechanical gate — "no tests to run" is explicitly not a pass. One task's failure never
+    ends a suite; each (task, arm) gets its own blackboard and workspace.
+57. **The package has an entry-point boundary (M41):** all 30 modules sat at the package
+    root, so all 30 were public API. The 11 only Pixibot uses — the loop, scheduler,
+    orchestrator, planner, prompt builder, tool bodies, terminal styling, run log,
+    completion, offline models — moved to `pixibot/lib/`. The 18 at the root are the public
+    surface, `__init__.py` re-exports nothing, and `.importlinter` turns each contract's
+    "Must not import" line into a checked contract (7 of them, enforced on commit).
 
 ---
 
 ## 15. Open questions
 
 **Resolved during the build:**
-- *Invalid projection* → **bounded repair loop** — implemented (`schema.obtain_valid`,
-  used by `tpm.plan`).
-- *Revision cycle* → decided: **re-invoke the TPM** with the prior projection +
-  demo feedback + current blackboard. Decision recorded; the interactive
-  demo/feedback loop is not yet wired into `run.run_pipeline` (see §16).
+- *Invalid projection* → **bounded repair loop** (`schema.obtain_valid`, used by
+  `tpm.plan` and `tpm.revise`).
+- *Revision cycle* → **re-invoke the TPM** with the prior projection, the feedback and the
+  current blackboard. Wired into both the interactive `revise` and the checkpoint review
+  loop (decision 55).
+- *Human-gated termination* → **checkpoints: mechanical gate, then demo, then verdict**
+  (decision 55). `pixibot --review`.
+- *Standards enforcement* → **mechanical where a tool can decide** (decision 49), judgment
+  in `standards/*.md`, injected progressively.
 
 ### Still needed from the user
-1. A **first concrete reference project** to validate against a real run.
-2. **Existing coding standards/style guides** to ingest, or keep authoring
-   `standards/` fresh.
+1. A **reference project** larger than a single module, to validate planning quality
+   rather than mechanics.
+2. **Existing coding standards** to ingest, or keep authoring `standards/` fresh.
 
 ---
 
 ## 16. Status & next steps
 
-**Implemented (M1–M30), 120 unit tests green, on `main`:** everything in §0–§14 plus
-decision-log entries 35–48 above — real multi-agent Claude runs writing tested code to
-per-run workspaces; the friendly shell + non-blocking split-pane TUI; multi-provider
-models (native Anthropic + OpenAI-compatible) with 1-hour prompt caching; stateful,
-confined agents with a self-correction loop; run isolation, a file run log, and
-crash-safe scheduling; and the greenfield-topology adoptions (A–E) as toggleable
-ablation arms (`Engine.features`).
+**Implemented (M1–M42), 223 tests green, on `main`:** everything in §0–§14 plus
+decision-log entries 35–57 — real multi-agent Claude runs writing tested code to sandboxed
+per-run workspaces; the friendly shell and the non-blocking split-pane TUI over one shared
+session; multi-provider models with 1-hour prompt caching; stateful, confined,
+self-correcting agents; run isolation, a file run log and crash-safe scheduling; the
+greenfield-topology arms (A–E) as toggles; a language-aware mechanical gate for Python and
+C/C++; the human checkpoint gate; and a benchmark harness over the arms.
 
-**Verified live:** real Anthropic builds produce structured, tested projects (e.g. a
-PyQt/ffmpeg video viewer with a passing suite). The stateful-transcript ↔ live-API seam
-surfaced several message-shape edge cases (empty blocks, dangling `tool_use`, binary
-files) — all fixed and regression-tested.
+**Quality floor (M34–M42):** `ruff` (complexity 10, max-args 6, annotations required) and
+`mypy --strict` are clean across the package — from 427 lint findings and 258 type errors
+at M34 to zero; `lint-imports` enforces seven dependency-direction contracts; 21 module
+contracts in `docs/contracts/`, structurally checked on commit; `pixibot/lib/` holds the
+internals and `pixibot/` is the public surface. Five defects the gates found on the way
+(not style): a `lastrowid` that could be `None`, three `None` dereferences in the demo, an
+unreachable spinner join, a symlink that escaped the workspace path check, and a TUI build
+path that had silently forked from the shell's.
+
+**Verified:** real Anthropic builds produce structured, tested projects (e.g. a PyQt/ffmpeg
+video viewer with a passing suite). The offline provider exercises the whole wiring with no
+key, and is what the suite and the demo run on.
 
 **Next:**
-- A **benchmark harness** over the toggleable arms (ProgramBench-derived prompts).
-- **C/C++ gate support** (g++ / CMake + ctest) — the mechanical gate is Python/`pytest`
-  only today; Pixibot targets Python and C/C++.
-- Real **Docker/sandbox** execution for `run_bash` (confinement is a cwd/env guard, not
-  yet a container).
-- Wire the **human checkpoint → demo → feedback** pause into the interactive loop.
-```
+- **Live container run:** the sandbox is wired and unit-tested, but this machine has no
+  Docker daemon, so `--sandbox docker` has not been exercised end to end. Build
+  `docker/` and run the benchmark inside it.
+- **A real benchmark pass** against a paid provider, to get numbers for the arms rather
+  than a harness that can produce them.
+- **Cost accounting per run:** token usage is logged per response (decision 46) but not
+  aggregated into the run report or the benchmark results.
+- **Existing-codebase mode:** decision 24 deferred it; everything so far is greenfield.
+- **`review_cadence`** from the strict input is parsed and unused: checkpoints come from
+  the projection only.
