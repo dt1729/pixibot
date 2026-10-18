@@ -112,7 +112,14 @@ _PROFILES: Mapping[str, _Profile] = {
 # Auto-detection order is cost, not capability: where an unconfigured user should land.
 _DETECT_ORDER = ("gemini", "openrouter", "anthropic")
 
-NAMES: tuple[str, ...] = (*_PROFILES, "offline")
+#: Depth -> model alias for the CLI provider. Cheaper than the API tiers on
+#: purpose: a simulated run is for exercising the harness, not for quality.
+CLI_DEPTH_MODELS = {"junior": "claude-haiku-4-5", "senior": "claude-sonnet-5",
+                    "principal": "claude-opus-5"}
+CLI_HARD_MODEL = "claude-fable-5-1"
+CLI_SPOKESBOT_MODEL = "claude-haiku-4-5"
+
+NAMES: tuple[str, ...] = (*_PROFILES, "claude-cli", "offline")
 
 
 def _depth_of(spec: Mapping[str, Any]) -> str:
@@ -175,6 +182,38 @@ class _LiveProvider:
                                  api_key_env=p.api_key_env, max_tokens=1024)
 
 
+class _CliProvider:
+    """Models answered by the Claude Code CLI (`claude -p`).
+
+    The point is the billing: the CLI runs against the operator's subscription,
+    so a simulated multi-agent run spends no API credit. It is slower and
+    non-deterministic, which is why it is chosen explicitly and never by
+    :func:`detect`.
+    """
+
+    name = "claude-cli"
+    label = "claude-cli (subscription, simulated)"
+    live = True
+
+    def tpm_model(self, objective: str = "") -> Model:  # noqa: ARG002 - offline uses it
+        from .claude_cli import ClaudeCliModel
+        return ClaudeCliModel(CLI_DEPTH_MODELS[_DEFAULT_DEPTH])
+
+    def model_factory(self, *, hard: bool = False) -> ModelFactory:
+        from .claude_cli import ClaudeCliModel
+
+        def factory(spec: dict[str, Any]) -> Model:
+            depth = _depth_of(spec)
+            model_id = (CLI_HARD_MODEL if hard and depth == "principal"
+                        else CLI_DEPTH_MODELS[depth])
+            return ClaudeCliModel(model_id)
+        return factory
+
+    def spokesbot(self) -> Model | None:
+        from .claude_cli import ClaudeCliModel
+        return ClaudeCliModel(CLI_SPOKESBOT_MODEL)
+
+
 class _OfflineProvider:
     """Scripted models: the full wiring runs deterministically without a key."""
 
@@ -198,6 +237,8 @@ def get(name: str) -> Provider:
     """Resolve a provider name. Builds no client and reads no key."""
     if name == "offline":
         return _OfflineProvider()
+    if name == "claude-cli":
+        return _CliProvider()
     profile = _PROFILES.get(name)
     if profile is None:
         raise UnknownProviderError(f"unknown provider {name!r}; options: {', '.join(NAMES)}")
@@ -205,7 +246,11 @@ def get(name: str) -> Provider:
 
 
 def detect(env: Mapping[str, str] | None = None) -> str:
-    """The provider to use when the user did not choose one (cheapest key wins)."""
+    """The provider to use when the user did not choose one (cheapest key wins).
+
+    `claude-cli` is never detected: it spends the operator's subscription rather
+    than an API key, and that is a decision for a person to make explicitly.
+    """
     environ = os.environ if env is None else env
     for name in _DETECT_ORDER:
         if environ.get(_PROFILES[name].api_key_env):

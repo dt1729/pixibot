@@ -108,3 +108,51 @@ never the real hook payload or the shipped template — the plugin's own inciden
 and carry the `manual` block at the foot only; a merge of identical content reports
 `unchanged` and a hand-edited manual block survives (verified). Both defects belong
 upstream in `dt1729/claude_lld`.
+
+---
+
+## 007 — The simulation provider blocked an agent on its first live build (M47)
+
+**What happened.** The first full build through `claude -p` ran 156 seconds and ended with
+the programmer BLOCKED: `CliFailedError: the CLI reported an error: error_max_turns`. The
+architect had already written `ARCHITECTURE.md`, so the run died with work in hand.
+
+**Why it survived.** Two reasons, and the unit tests could not see either:
+
+* `--max-turns 2` was copied from a one-shot judge, where the model answers in a single
+  turn. An agent prompt is long enough that the CLI spends a turn answering and may need
+  another to fit the output schema.
+* `parse_envelope` checked `is_error` **before** it looked at the result, so a CLI that
+  errored *after* producing a usable answer had that answer thrown away.
+
+Every unit test used a runner double that returned a well-formed envelope, so neither
+path was exercised. The defects were only reachable against the real CLI.
+
+**Prevention.** The turn budget is 6 and is a constructor argument. `parse_envelope`
+parses first and raises only when there is no answer to keep; an error that still carried
+an answer is logged at WARNING and used. Both have tests. The second live build passed the
+gate, negative control included.
+
+**Also learned, not a defect.** A `claude -p` turn carries about 20,000 input tokens of
+Claude Code's own system prompt even with `--system-prompt` replacing it. The default
+per-agent ceiling of 40,000 therefore buys two turns, and all three agents in that build
+ended BUDGET_EXHAUSTED rather than DONE. The work still landed, but per-agent budgets are
+calibrated for API calls, not for the CLI's fixed overhead: raise them when simulating.
+
+---
+
+## 008 — BUDGET_EXHAUSTED silently stopped the dependency cascade (M47, open)
+
+**What happened.** Seen in the same live build. `ContextManager.step` wakes an agent's
+dependents only when its terminal state is `DONE`. M46 made `BUDGET_EXHAUSTED` reachable
+for the first time, so a spent agent no longer wakes the agent waiting on it. The chain
+survived that build only because the `default` arm has continuous testing on, which
+re-activates readers on an artifact write — a different code path.
+
+**Why it survived.** `BUDGET_EXHAUSTED` was a state DESIGN.md had named since M1 and
+nothing ever set, so no test covered what the scheduler does with it. The same gap applies
+to `BLOCKED`: a crashed agent has never woken its dependents either, which means one crash
+stalls everything downstream of it.
+
+**Prevention.** Not yet fixed — the fix belongs with the scheduler's notion of "finished",
+which should cover every terminal state rather than only success. Tracked in DESIGN.md §16.

@@ -37,7 +37,13 @@ include = ["pixibot*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# The simulation tier calls the Claude Code CLI: seconds per turn, real
+# subscription usage, and a non-deterministic model. It is never part of the
+# offline suite. Run it on purpose: pytest -m simulation
+addopts = "-q -m 'not simulation'"
+markers = [
+    "simulation: drives a real model through `claude -p`; costs time and subscription usage",
+]
 
 # ── Lint ─────────────────────────────────────────────────────────────────────
 [tool.ruff]

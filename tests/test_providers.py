@@ -70,9 +70,42 @@ class ProviderResolutionTest(unittest.TestCase):
         self.assertFalse(bot.use_thinking)   # Haiku rejects adaptive thinking
 
 
+class ClaudeCliProviderTest(unittest.TestCase):
+    """The CLI provider spends a subscription, so it is chosen, never detected."""
+
+    def test_it_is_a_known_provider_and_is_live(self):
+        p = providers.get("claude-cli")
+        self.assertEqual(p.name, "claude-cli")
+        self.assertTrue(p.live)
+        self.assertIn("subscription", p.label)
+
+    def test_depth_picks_a_cheaper_model_than_the_api_tiers(self):
+        factory = providers.get("claude-cli").model_factory()
+        self.assertEqual(factory(spec("junior")).model_id, "claude-haiku-4-5")
+        self.assertEqual(factory(spec("senior")).model_id, "claude-sonnet-5")
+        self.assertEqual(factory(spec("principal")).model_id, "claude-opus-5")
+
+    def test_hard_development_routes_principal_to_fable(self):
+        factory = providers.get("claude-cli").model_factory(hard=True)
+        self.assertEqual(factory(spec("principal")).model_id, "claude-fable-5-1")
+
+    def test_the_spokesbot_is_the_cheap_model(self):
+        self.assertEqual(providers.get("claude-cli").spokesbot().model_id,
+                         "claude-haiku-4-5")
+
+    def test_building_it_starts_no_process(self):
+        # construction must not shell out: an unconfigured machine still imports
+        providers.get("claude-cli").tpm_model("anything")
+
+
 class DetectTest(unittest.TestCase):
     def test_no_keys_is_offline(self):
         self.assertEqual(providers.detect({}), "offline")
+
+    def test_the_cli_provider_is_never_detected(self):
+        # it spends the operator's subscription: that is a person's decision
+        for env in ({}, {"ANTHROPIC_API_KEY": "x"}, {"GEMINI_API_KEY": "x"}):
+            self.assertNotEqual(providers.detect(env), "claude-cli")
 
     def test_each_key_selects_its_provider(self):
         self.assertEqual(providers.detect({"ANTHROPIC_API_KEY": "x"}), "anthropic")

@@ -29,6 +29,7 @@ type = forbidden
 source_modules =
     pixibot.engine
     pixibot.providers
+    pixibot.claude_cli
     pixibot.gates
     pixibot.runtime
     pixibot.workspace

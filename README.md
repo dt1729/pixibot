@@ -82,12 +82,30 @@ Pixibot auto-detects from your environment, cheapest key first.
 | **Gemini** | Free key at aistudio.google.com → `export GEMINI_API_KEY=AIza...` | Free tier |
 | **OpenRouter** | Key at openrouter.ai → `export OPENROUTER_API_KEY=sk-or-...` | Pay-per-token (many models) |
 | **Anthropic** | `ANTHROPIC_API_KEY` | Pay-per-token (Claude) |
+| **claude-cli** | nothing — uses the Claude Code CLI you already have | Subscription, not API credit |
 | **offline** | nothing — canned multi-agent mock | Free |
 
 Everything provider-specific is one `_Profile` entry in `pixibot/providers.py`: base URL,
 key variable, depth → model table, hard-development model, spokesbot model. Adding a
 provider is that entry and nothing else. `hard on` routes principal agents to the active
 provider's strongest model at `xhigh` effort.
+
+### Simulated runs (`--provider claude-cli`)
+
+`claude -p` answers one prompt and exits, billing the operator's Claude Code
+**subscription** rather than per token. So a whole multi-agent build can be exercised
+against a real, unscripted model at no API cost:
+
+```bash
+python3 -m pixibot --provider claude-cli --objective "an LRU cache with tests"
+python3 -m pixibot.benchmark --provider claude-cli --arms default --only lru-cache
+pytest -m simulation            # the opt-in test tier (excluded from `pytest`)
+```
+
+It is slower (seconds per turn, ~20k input tokens of CLI system prompt each) and
+non-deterministic, so it is never part of the default suite and is never auto-detected.
+The CLI runs with every tool blocked, no MCP server attached, permissions not skipped, the
+prompt on stdin, and its session transcript purged after each turn.
 
 ## Output: real files, in a sandbox
 
