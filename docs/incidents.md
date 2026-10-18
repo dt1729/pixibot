@@ -141,7 +141,7 @@ calibrated for API calls, not for the CLI's fixed overhead: raise them when simu
 
 ---
 
-## 008 — BUDGET_EXHAUSTED silently stopped the dependency cascade (M47, open)
+## 008 — BUDGET_EXHAUSTED silently stopped the dependency cascade (M47, fixed M48)
 
 **What happened.** Seen in the same live build. `ContextManager.step` wakes an agent's
 dependents only when its terminal state is `DONE`. M46 made `BUDGET_EXHAUSTED` reachable
@@ -154,5 +154,8 @@ nothing ever set, so no test covered what the scheduler does with it. The same g
 to `BLOCKED`: a crashed agent has never woken its dependents either, which means one crash
 stalls everything downstream of it.
 
-**Prevention.** Not yet fixed — the fix belongs with the scheduler's notion of "finished",
-which should cover every terminal state rather than only success. Tracked in DESIGN.md §16.
+**Prevention.** The scheduler's notion of "finished" now covers every terminal state:
+`TERMINAL_STATES` is DONE, BLOCKED and BUDGET_EXHAUSTED, and all three wake dependents and
+count toward `completed()`. A dependent that runs with what exists beats a run that stalls
+behind a crashed or spent agent, and a checkpoint declared after one now falls due instead
+of never. Three tests cover it, and all three fail when the set is narrowed back to DONE.

@@ -324,6 +324,8 @@ class Engine:
         for spec in new:
             orchestrator.register_one(spec, self.cm, self.model_factory, run)
             # only depend on agents that already completed, so new agents can start
+            # only depend on agents whose turn is already over, so a new agent
+            # can start rather than wait on something that will never finish
             self.cm.set_deps(spec["id"], deps.get(spec["id"], set()) & self.cm.completed())
         for spec in new:
             self.bb.send("tpm", f"(revision) {feedback}", to=spec["id"])

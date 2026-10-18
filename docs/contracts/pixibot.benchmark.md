@@ -28,7 +28,8 @@ class Report:
     def to_json(self) -> str
 
 STANDARD_ARMS: tuple[Arm, ...]      # bare, default, auto-gate, both (a 2x2 ablation)
-DEFAULT_TASKS: tuple[Task, ...]
+DEFAULT_TASKS: tuple[Task, ...]     # built to need a team
+SMOKE_TASKS: tuple[Task, ...]       # easy exercises; every arm scores the same
 EngineSource = Callable[[Task, Arm], Engine]
 
 def default_engines(provider_name: str, base: str = DEFAULT_BASE) -> EngineSource
@@ -56,6 +57,12 @@ def main(argv: list[str] | None = None) -> None
   three arms when four were asked for would corrupt the conclusion.
 - Timings are wall-clock seconds and include model latency; they compare arms within one
   run, not across machines or days.
+- **The task set is part of the measurement.** `DEFAULT_TASKS` each name more than one
+  module, an interface two modules must agree on, a constraint that fights the obvious
+  approach, and a behaviour only a deterministic test pins down - so a single agent that
+  writes the obvious thing fails the stated acceptance criteria. `SMOKE_TASKS` are the
+  easy exercises (`--set smoke`): every arm scores the same on them, which measures that
+  the harness runs and nothing about a topology.
 
 ## Seam
 
@@ -110,6 +117,8 @@ measurement.
 - `by_arm` tallies passes per arm; `table` names every run and the tally
 - the report round-trips through JSON, and an empty report still renders
 - an unknown arm name raises; the standard arms are four distinct feature sets
+- the two task sets do not overlap, and both name tests in every objective
+- every hard task names its modules and states acceptance criteria; smoke tasks stay small
 - tasks load from a JSON file, defaulting language and hard
 - offline end to end: a real engine, isolated directories, and a not-applicable verdict
   for the canned mock output

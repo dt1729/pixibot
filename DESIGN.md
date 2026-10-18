@@ -545,6 +545,39 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
     completion, offline models — moved to `pixibot/lib/`. The 18 at the root are the public
     surface, `__init__.py` re-exports nothing, and `.importlinter` turns each contract's
     "Must not import" line into a checked contract (7 of them, enforced on commit).
+58. **A checkpoint stops the run when it falls due (M44):** the M39 implementation
+    evaluated checkpoints after quiescence, so `after: [architect]` meant "once everybody
+    has finished and the budget is spent". The scheduler now takes a **barrier** called
+    after each activation; the engine alternates run and review, and the agents not yet
+    polled keep their inbox events so a paused run resumes exactly where it stopped. The
+    TUI reviews in a **pane** rather than through stdin, which Textual owns - the previous
+    combination could hang the default interactive path.
+59. **A green suite is not evidence on its own (M45):** the agents write the tests, so the
+    gate adds a **negative control** - hide the implementation, run the suite again, and
+    demand that it fails. `def test_x(): assert True` is now red. It proves that at least
+    one test depends on the implementation, which is stated as its limit.
+60. **The compute budget is applied (M46):** decision 14 was unimplemented because nothing
+    counted tokens. `ModelResponse` carries `TokenUsage`, every model fills it in, an agent
+    stops at its own ceiling (terminal state `BUDGET_EXHAUSTED`, named in §9 since M1 and
+    never set until now), and the run stops at `budget_ceilings.compute` through the same
+    barrier. An unreadable ceiling is unbounded, never zero.
+61. **Simulated runs, not anecdotes (M47):** `claude -p` becomes a provider
+    (`--provider claude-cli`), so a whole multi-agent build runs against a real,
+    unscripted model billed to the operator's subscription rather than an API key. The
+    flag set is taken from a working one (infra-pivot's judge) and every flag is
+    load-bearing - `--json-schema` for the tool-call shape, `--system-prompt` to replace
+    Claude Code's own, tools blocked and their schemas stripped, no MCP server, prompt on
+    stdin, transcript purged. A `simulation` pytest marker keeps it out of the offline
+    suite. The first live build found two defects a runner double could not (incident 007);
+    the second passed the gate, negative control included.
+62. **Terminal means finished (M48):** DONE, BLOCKED and BUDGET_EXHAUSTED all wake
+    dependents and count toward `completed()`. The scheduler used to cascade only on
+    success, so one crashed or spent agent stalled everything downstream (incident 008).
+63. **Benchmark tasks must be hard enough to separate the arms (M48):** the first task set
+    was five solved exercises, so every arm scored the same and the benchmark measured
+    nothing. `DEFAULT_TASKS` now each need a team - multiple modules, a shared interface, a
+    constraint that fights the obvious approach, deterministic-only behaviour - and the old
+    set is kept as `SMOKE_TASKS` (`--set smoke`) for what it is good for.
 
 ---
 
@@ -592,6 +625,13 @@ video viewer with a passing suite). The offline provider exercises the whole wir
 key, and is what the suite and the demo run on.
 
 **Next:**
+- **A real benchmark pass on the hard task set**, through `--provider claude-cli` (no API
+  credit) or a paid provider, to get numbers for the arms rather than a harness that can
+  produce them. One easy task through the CLI takes about four minutes; the hard set is
+  five multi-module tasks against four arms.
+- **Per-agent budgets calibrated for the CLI:** a `claude -p` turn carries about 20k input
+  tokens of Claude Code system prompt, so a 40k agent ceiling buys two turns and agents
+  finish BUDGET_EXHAUSTED (incident 007). Raise them for simulated runs.
 - **Live container run:** the sandbox is wired and unit-tested, but this machine has no
   Docker daemon, so `--sandbox docker` has not been exercised end to end. Build
   `docker/` and run the benchmark inside it.

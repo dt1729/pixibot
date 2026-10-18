@@ -6,6 +6,12 @@ arms and reports what each produced, judged by the **mechanical gate** — the s
 green/red the human checkpoint uses, so a benchmark score and a shipped build mean
 the same thing.
 
+The task set matters as much as the harness. ``DEFAULT_TASKS`` are built to need
+a team: more than one module, an interface two modules must agree on, a
+constraint that fights the obvious approach, and behaviour only a deterministic
+test pins down. ``SMOKE_TASKS`` are the easy exercises a single model one-shots;
+every arm scores the same on those, which measures nothing about a topology.
+
 Run it:
 
     python -m pixibot.benchmark --provider offline            # smoke, no key
@@ -65,15 +71,63 @@ STANDARD_ARMS: tuple[Arm, ...] = (
     Arm("both", frozenset(ALL_FEATURES)),
 )
 
-#: Small, self-contained programs with an obvious test surface — the kind of task
-#: where a mechanical gate is a fair judge. Pass --tasks to use your own.
-DEFAULT_TASKS: tuple[Task, ...] = (
+#: Small, self-contained programs with an obvious test surface. Every arm scores
+#: the same on these, so they measure that the harness runs - not whether a
+#: topology helps. Use them as a smoke check: --set smoke.
+SMOKE_TASKS: tuple[Task, ...] = (
     Task("lru-cache", "an LRU cache class with a capacity bound, plus pytest tests"),
     Task("csv2json", "a CLI that converts a CSV file to JSON, plus pytest tests"),
     Task("url-shortener", "a URL shortener library with encode/decode and pytest tests"),
     Task("md-table", "a Markdown table formatter that aligns columns, plus pytest tests"),
     Task("interval-merge", "a function that merges overlapping integer intervals, "
                            "plus pytest tests"),
+)
+
+#: Tasks built to need a team. Each one has more than one module, an interface
+#: two modules must agree on, a constraint that fights the obvious approach, and
+#: a behaviour only a deterministic test pins down. A single agent that writes
+#: the obvious thing fails the stated acceptance criteria.
+DEFAULT_TASKS: tuple[Task, ...] = (
+    Task("ledger", (
+        "A double-entry ledger in three modules: ledger.py (the core), importer.py "
+        "(reads CSV rows into transactions) and cli.py (a command-line entry point), "
+        "plus pytest tests. Acceptance: every transaction must balance to zero across "
+        "its entries, and the importer must REJECT an unbalanced row with a named error "
+        "rather than skip it or round it. The core must not import the importer or the "
+        "CLI. Tests must cover a balanced import, an unbalanced row, and a row with an "
+        "unknown account.")),
+    Task("rate-limiter", (
+        "A token-bucket rate limiter in two modules: limiter.py and clock.py, plus "
+        "pytest tests. Acceptance: per-key buckets with a documented burst size and "
+        "refill rate; the limiter takes its clock as a dependency so tests never sleep; "
+        "refill is proportional to elapsed time, not a whole token per call. Tests must "
+        "prove refill over simulated time, a burst being exhausted, and two keys not "
+        "sharing a bucket - with no call to time.sleep anywhere.")),
+    Task("config-layers", (
+        "A layered configuration loader in two modules: layers.py and coerce.py, plus "
+        "pytest tests. Acceptance: precedence is defaults < file < environment < "
+        "command line, decided PER KEY rather than per layer; values coerce to the "
+        "declared type (int, bool, list) and an uncoercible value raises a named error "
+        "that says which key and which layer it came from; the loader reports, for every "
+        "key, which layer won. Tests must prove the per-key precedence and one coercion "
+        "failure.")),
+    Task("retry-policy", (
+        "A retry policy in two modules: policy.py and backoff.py, plus pytest tests. "
+        "Acceptance: exponential backoff with jitter, where both the clock and the "
+        "random source are injected so every test is deterministic; a total elapsed-time "
+        "budget that stops retrying even when attempts remain; and a NonRetryable error "
+        "class that is never retried. Tests must prove the backoff sequence exactly, the "
+        "elapsed budget cutting a retry short, and NonRetryable failing on the first "
+        "attempt - with no sleeping and no randomness.")),
+    Task("plugin-registry", (
+        "A plugin registry in three modules: protocol.py (the Plugin interface), "
+        "registry.py (registration and lookup) and discover.py (finds plugins from a "
+        "mapping of name to callable), plus pytest tests. Acceptance: registry and "
+        "discover must both depend on protocol.py and not on each other; a duplicate "
+        "plugin name is refused with a named error; plugins run in declared priority "
+        "order with a stable tie-break by name; and a dry-run lists what would run "
+        "without running it. Tests must cover the duplicate refusal, the ordering "
+        "including a tie, and that a dry run has no side effect.")),
 )
 
 #: (task, arm) -> a fresh Engine configured for that run.
@@ -222,7 +276,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--provider", choices=providers.NAMES, default="offline")
     ap.add_argument("--arms", default="default",
                     help="comma-separated: " + ", ".join(a.name for a in STANDARD_ARMS))
-    ap.add_argument("--tasks", help="JSON file of tasks (default: the built-in set)")
+    ap.add_argument("--tasks", help="JSON file of tasks (overrides --set)")
+    ap.add_argument("--set", choices=("hard", "smoke"), default="hard",
+                    dest="task_set", help="built-in task set (default: hard)")
     ap.add_argument("--only", help="comma-separated task ids to run")
     ap.add_argument("--base", default=DEFAULT_BASE, help="where runs are written")
     ap.add_argument("--out", help="write the JSON results here as well as the table")
@@ -231,7 +287,8 @@ def main(argv: list[str] | None = None) -> None:
     # instead of interleaving with the results table on stdout.
     logbook.setup()
 
-    tasks = load_tasks(args.tasks) if args.tasks else DEFAULT_TASKS
+    builtin = DEFAULT_TASKS if args.task_set == "hard" else SMOKE_TASKS
+    tasks = load_tasks(args.tasks) if args.tasks else builtin
     if args.only:
         wanted = {t.strip() for t in args.only.split(",")}
         tasks = tuple(t for t in tasks if t.id in wanted)

@@ -38,6 +38,12 @@ STATE_DONE = "DONE"
 STATE_BLOCKED = "BLOCKED"
 STATE_BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"   # spent its compute ceiling (§9)
 
+#: An agent in any of these has finished its turn and will not produce more of
+#: its own accord. Dependents wake on all three: a downstream agent that works
+#: with what exists beats a run that stalls behind a crashed or spent one
+#: (docs/incidents.md 008).
+TERMINAL_STATES = (STATE_DONE, STATE_BLOCKED, STATE_BUDGET_EXHAUSTED)
+
 ROUTER = "context-manager"  # from_agent used for dependency-ready notifications
 
 
@@ -51,7 +57,7 @@ class ContextManager:
         self._readers: list[tuple[str, str]] = []          # (section_pattern, reader_id)
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
         self._deps: dict[str, set[str]] = {}               # agent_id -> agent_ids it needs
-        self._done: set[str] = set()                       # agents that have completed
+        self._finished: set[str] = set()                   # agents whose turn is over
         self._paused = False                               # the barrier stopped a run
         # Optional live-progress hooks.
         self.on_activation: ActivationHook | None = None
@@ -66,8 +72,13 @@ class ContextManager:
         return agent_id in self._runners
 
     def completed(self) -> frozenset[str]:
-        """The agents that have finished a turn in state DONE."""
-        return frozenset(self._done)
+        """The agents whose turn is over, whatever the outcome.
+
+        DONE, BLOCKED and BUDGET_EXHAUSTED all count: a dependent waiting on a
+        crashed or spent agent would otherwise wait for the whole run, and a
+        checkpoint declared after it would never fall due.
+        """
+        return frozenset(self._finished)
 
     def spent(self) -> int:
         """Tokens every registered agent has spent so far, as far as the models
@@ -132,8 +143,8 @@ class ContextManager:
             _log.info("done %s -> %s wrote=%s", agent_id, terminal, wrote or "(nothing)")
             if self.on_activation:
                 self.on_activation(agent_id, terminal, wrote)
-            if terminal == STATE_DONE:
-                self._done.add(agent_id)
+            if terminal in TERMINAL_STATES:
+                self._finished.add(agent_id)
                 self._wake_dependents(agent_id)
             if barrier is not None and not barrier(agent_id):
                 self._paused = True
@@ -142,11 +153,11 @@ class ContextManager:
         return activated
 
     def _wake_dependents(self, completed_id: str) -> None:
-        """Wake only agents that *directly depend on* the just-completed agent, and
-        only once all of their dependencies are satisfied. Limiting to direct
-        dependents avoids re-waking already-satisfied agents on every completion."""
+        """Wake only agents that *directly depend on* the agent that just finished,
+        and only once all of their dependencies have finished. Limiting to direct
+        dependents avoids re-waking already-satisfied agents every time."""
         for aid, deps in self._deps.items():
-            if completed_id in deps and deps <= self._done:
+            if completed_id in deps and deps <= self._finished:
                 self.bb.send(ROUTER, "ready: dependencies complete", to=aid)
 
     def run(self, *, barrier: Barrier | None = None) -> int:

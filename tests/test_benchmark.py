@@ -13,6 +13,7 @@ from pathlib import Path
 
 from pixibot.benchmark import (
     DEFAULT_TASKS,
+    SMOKE_TASKS,
     STANDARD_ARMS,
     Arm,
     Report,
@@ -187,10 +188,27 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(len(sets), len(set(sets)))
 
     def test_built_in_tasks_have_unique_ids_and_mention_tests(self):
-        ids = [t.id for t in DEFAULT_TASKS]
-        self.assertEqual(len(ids), len(set(ids)))
-        for t in DEFAULT_TASKS:
-            self.assertIn("test", t.objective)
+        for task_set in (DEFAULT_TASKS, SMOKE_TASKS):
+            ids = [t.id for t in task_set]
+            self.assertEqual(len(ids), len(set(ids)))
+            for t in task_set:
+                self.assertIn("test", t.objective)
+
+    def test_the_two_task_sets_do_not_overlap(self):
+        self.assertEqual({t.id for t in DEFAULT_TASKS} & {t.id for t in SMOKE_TASKS}, set())
+
+    def test_the_hard_tasks_state_what_a_single_agent_gets_wrong(self):
+        """A task that measures a topology has to be more than one module, with an
+        acceptance criterion a one-shot answer misses."""
+        for task in DEFAULT_TASKS:
+            with self.subTest(task=task.id):
+                self.assertIn("Acceptance", task.objective)
+                self.assertIn(".py", task.objective)          # it names its modules
+                self.assertGreater(len(task.objective), 300)  # room for the trap
+
+    def test_the_smoke_tasks_stay_small(self):
+        for task in SMOKE_TASKS:
+            self.assertLess(len(task.objective), 200)
 
     def test_tasks_load_from_json(self):
         d = tempfile.mkdtemp()

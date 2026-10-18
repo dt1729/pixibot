@@ -40,6 +40,9 @@ def kick(bb: Blackboard, projection: Projection) -> None
   empty, so every agent always has a goal in context.
 - `materialize` is idempotent per agent id only in the sense that `ContextManager.register`
   overwrites: calling it twice on one projection re-registers the same agents.
+- A dependency is satisfied when the agent it names has **finished its turn**, whatever
+  the outcome: DONE, BLOCKED or BUDGET_EXHAUSTED. A chain that only advanced on success
+  stalled behind one crashed or spent agent (docs/incidents.md 008).
 
 ## Seam
 
