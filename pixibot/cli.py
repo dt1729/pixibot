@@ -64,7 +64,6 @@ class EngineFactory(Protocol):
 QUIT = "__quit__"
 CLEAR = "__clear__"
 
-HEAVY = {"build", "build-from", "buildfrom", "revise", "tell"}  # spin while these run
 
 _NO_WORKSPACE = "(no workspace yet — run a build first)"
 

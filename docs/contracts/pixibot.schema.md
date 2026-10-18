@@ -11,6 +11,7 @@ Decide whether a request or a plan is well-formed, and get a valid one out of a 
 
 ```python
 DEPTHS = {"junior", "senior", "principal"}
+Projection = dict[str, Any]       # a TPM plan, shaped as validate_projection requires
 
 def compute_ceiling(raw: Any) -> int | None
 
@@ -28,6 +29,10 @@ def obtain_valid(generate: Callable[[list[str]], Any],
 - Both validators **return error strings and never raise** — an empty list means valid.
   The strings are written to be fed back to a model, so they name the path
   (`projection.agents[2].budget.depth`) and what was expected.
+- `Projection` and `DEPTHS` live here because this module decides what makes a plan
+  valid. `engine` and `lib.orchestrator` each declared `Projection` separately, and
+  `providers` held a second `DEPTHS`, until M51; a projection shape that means two things
+  is how a validator and its caller disagree about the same plan.
 - Validation is **structural only**: shapes, types and enum membership. Whether an
   objective is sensible is not a schema question and is not pretended to be one.
 - `compute_ceiling` reads a token ceiling out of whatever a model or a form wrote —

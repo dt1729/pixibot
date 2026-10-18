@@ -63,7 +63,8 @@ would be ceremony around one table.
 
 ## Dependencies
 
-- **May import:** `pixibot.model`, `pixibot.lib.mockrun`, stdlib
+- **May import:** `pixibot.model`, `pixibot.schema` (`DEPTHS`, the one definition),
+  `pixibot.lib.mockrun`, stdlib
 - **Must not import:** `pixibot.engine`, `pixibot.cli`, `pixibot.tui`, `pixibot.run` —
   provider choice must not know what a run does with the models
 - **Imported by:** `pixibot.cli`, `pixibot.tui` (through the session), `pixibot.run`

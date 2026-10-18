@@ -13,7 +13,8 @@ decide when it is done. `DESIGN.md` is the decision log and the source of truth.
 | `pixibot/` | the public surface: engine, pipeline, providers, blackboard, workspace, gates, checkpoints, runtime, schema, intake, observer, interaction, and the three front ends (cli, tui, benchmark) | `pixibot.lib.*`, stdlib, provider SDKs (lazily) |
 | `pixibot/lib/` | internals: the agent loop, the scheduler, the orchestrator, the planner, prompt building, tool bodies, terminal styling, the run log, completion, offline scripted models | the public root, stdlib |
 | `tests/` | behaviour through the interfaces, with `tests/support.py` holding the shared blackboard fixture | everything |
-| `scripts/` | repo checks that are not part of the package (`check_contracts.py`) | stdlib |
+| `scripts/` | repo checks that are not part of the package (`check_contracts.py`,
+  `check_claims.py`) | stdlib |
 | `standards/` | the judgment half of the coding standards, injected into agent prompts | — |
 | `docker/` | the per-run sandbox image (`pixibot-run:latest`) | — |
 
@@ -30,7 +31,8 @@ decide when it is done. `DESIGN.md` is the decision log and the source of truth.
    handed a provider's models, the workspace an executor, the gate an executor, the session
    a broker and an engine factory.
 5. **Gates are not advisory.** `ruff`, `mypy --strict`, `lint-imports`,
-   `scripts/check_contracts.py` and `pytest` all pass before a commit (`pre-commit install`
+   `scripts/check_contracts.py`, `scripts/check_claims.py` and `pytest` all pass before a
+   commit (`pre-commit install`
    is done). Fix the code, not the config.
 6. **The harness is held to the standard it enforces.** The mechanical half lives in
    `pyproject.toml` and `.importlinter`; `standards/*.md` keeps only what a tool cannot check.

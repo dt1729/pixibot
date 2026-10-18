@@ -42,6 +42,13 @@ repos:
         types: [python]
         pass_filenames: false
 
+      - id: claims
+        name: claims (every contract true of its module, by AST)
+        entry: python3 scripts/check_claims.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
       - id: pytest
         name: pytest
         entry: python3 -m pytest -q

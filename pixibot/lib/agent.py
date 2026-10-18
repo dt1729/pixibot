@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
@@ -69,14 +69,6 @@ class RunContext:
     objective: str = ""
 
 
-@dataclass(frozen=True)
-class Toolset:
-    """The tools an agent may call: definitions the model sees, impls we run."""
-
-    defs: list[dict[str, Any]] = field(default_factory=lambda: list(DEFAULT_TOOL_DEFS))
-    impls: Mapping[str, ToolImpl] = field(default_factory=default_tool_impls)
-
-
 class ReasoningAgent:
     """The shared loop. One instance per projection agent."""
 
@@ -85,8 +77,9 @@ class ReasoningAgent:
         self.run = run or RunContext()
         # The tool surface is the same for every agent. What varies per agent is
         # which sections it may READ, and that is AgentSpec.read_denylist,
-        # enforced in the tool bodies. A Toolset seam stood here until M50 with
-        # one implementation and no substitution: a hypothetical seam costs depth.
+        # enforced in the tool bodies. A Toolset dataclass stood here until M50
+        # with one implementation and no substitution: a hypothetical seam costs
+        # depth. M51 removed the class itself, which M50 left behind (incident 012).
         self.tool_defs: list[dict[str, Any]] = list(DEFAULT_TOOL_DEFS)
         self.tool_impls: Mapping[str, ToolImpl] = default_tool_impls()
         self.spent = TokenUsage()   # this run's tokens, across every activation

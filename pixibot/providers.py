@@ -17,20 +17,18 @@ Contract: docs/contracts/pixibot.providers.md
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from .model import Model
+from .model import Model, ModelFactory
+from .schema import DEPTHS
 
-ModelFactory = Callable[[dict[str, Any]], Model]
-
-DEPTHS = ("junior", "senior", "principal")
 _DEFAULT_DEPTH = "senior"
 
 # Depth -> reasoning effort (DESIGN.md §8/§9). Native Anthropic only; the
 # OpenAI-compatible endpoints have no effort knob.
-DEPTH_EFFORT = {"junior": "medium", "senior": "high", "principal": "xhigh"}
+_DEPTH_EFFORT = {"junior": "medium", "senior": "high", "principal": "xhigh"}
 _HARD_EFFORT = "xhigh"  # hard, long-horizon development runs at xhigh at every tier
 
 
@@ -114,10 +112,10 @@ _DETECT_ORDER = ("gemini", "openrouter", "anthropic")
 
 #: Depth -> model alias for the CLI provider. Cheaper than the API tiers on
 #: purpose: a simulated run is for exercising the harness, not for quality.
-CLI_DEPTH_MODELS = {"junior": "claude-haiku-4-5", "senior": "claude-sonnet-5",
+_CLI_DEPTH_MODELS = {"junior": "claude-haiku-4-5", "senior": "claude-sonnet-5",
                     "principal": "claude-opus-5"}
-CLI_HARD_MODEL = "claude-fable-5-1"
-CLI_SPOKESBOT_MODEL = "claude-haiku-4-5"
+_CLI_HARD_MODEL = "claude-fable-5-1"
+_CLI_SPOKESBOT_MODEL = "claude-haiku-4-5"
 
 NAMES: tuple[str, ...] = (*_PROFILES, "claude-cli", "offline")
 
@@ -153,12 +151,12 @@ class _LiveProvider:
 
     @staticmethod
     def _effort(depth: str, *, hard: bool) -> str:
-        return _HARD_EFFORT if hard else DEPTH_EFFORT[depth]
+        return _HARD_EFFORT if hard else _DEPTH_EFFORT[depth]
 
     # -- the interface ------------------------------------------------------
     def tpm_model(self, objective: str = "") -> Model:  # noqa: ARG002 - offline uses it
         return self._build(self._p.depth_models[_DEFAULT_DEPTH],
-                           effort=DEPTH_EFFORT[_DEFAULT_DEPTH],
+                           effort=_DEPTH_EFFORT[_DEFAULT_DEPTH],
                            max_tokens=self._p.tpm_max_tokens)
 
     def model_factory(self, *, hard: bool = False) -> ModelFactory:
@@ -197,21 +195,21 @@ class _CliProvider:
 
     def tpm_model(self, objective: str = "") -> Model:  # noqa: ARG002 - offline uses it
         from .claude_cli import ClaudeCliModel
-        return ClaudeCliModel(CLI_DEPTH_MODELS[_DEFAULT_DEPTH])
+        return ClaudeCliModel(_CLI_DEPTH_MODELS[_DEFAULT_DEPTH])
 
     def model_factory(self, *, hard: bool = False) -> ModelFactory:
         from .claude_cli import ClaudeCliModel
 
         def factory(spec: dict[str, Any]) -> Model:
             depth = _depth_of(spec)
-            model_id = (CLI_HARD_MODEL if hard and depth == "principal"
-                        else CLI_DEPTH_MODELS[depth])
+            model_id = (_CLI_HARD_MODEL if hard and depth == "principal"
+                        else _CLI_DEPTH_MODELS[depth])
             return ClaudeCliModel(model_id)
         return factory
 
     def spokesbot(self) -> Model | None:
         from .claude_cli import ClaudeCliModel
-        return ClaudeCliModel(CLI_SPOKESBOT_MODEL)
+        return ClaudeCliModel(_CLI_SPOKESBOT_MODEL)
 
 
 class _OfflineProvider:

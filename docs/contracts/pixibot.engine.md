@@ -85,7 +85,8 @@ engine a file you had to edit to add a language, a topology or a sandbox.
 
 - **May import:** `pixibot.gates`, `pixibot.observer`, `pixibot.lib.orchestrator`,
   `pixibot.lib.tpm`, `pixibot.lib.agent`, `pixibot.blackboard`, `pixibot.lib.context_manager`,
-  `pixibot.model`, `pixibot.runtime`, `pixibot.workspace`, `pixibot.lib.logbook`
+  `pixibot.model`, `pixibot.runtime`, `pixibot.workspace`, `pixibot.lib.logbook`,
+  `pixibot.schema` (`compute_ceiling`, `Projection`)
 - **Must not import:** `pixibot.cli`, `pixibot.tui`, `pixibot.providers` — the UI calls
   the engine, and the provider is chosen before one is built
 - **Imported by:** `pixibot.cli`, `pixibot.tui`, `pixibot.demo`

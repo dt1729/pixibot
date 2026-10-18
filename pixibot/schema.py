@@ -14,6 +14,10 @@ from typing import Any
 
 DEPTHS = {"junior", "senior", "principal"}
 
+#: A validated TPM plan. Defined here because this module decides what makes one
+#: valid; `engine` and `lib.orchestrator` each declared it separately until M51.
+Projection = dict[str, Any]
+
 
 def _require(
     obj: dict[str, Any],

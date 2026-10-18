@@ -10,7 +10,6 @@ Answer a model turn through the Claude Code CLI, so a run can be simulated witho
 ## Interface
 
 ```python
-WINDOWS_FALLBACK: str                 # the winget path, reachable from WSL
 DEFAULT_TIMEOUT = 600
 DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TURNS = 6

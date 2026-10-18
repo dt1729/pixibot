@@ -92,6 +92,11 @@ a toolset, and no caller could reach the parameter, because the only production 
 hypothetical seam, and lld-seed says those cost depth. The tool surface is now held
 directly on the agent.
 
+M50 removed the parameter and the attribute but left the `Toolset` class standing, unused,
+and the test it shipped — the agent has no `tools` attribute — passed anyway. A dead name
+is invisible to a behavioural test. `scripts/check_claims.py` found it on its first run
+(docs/incidents.md 012); M51 deleted the class.
+
 Rejected: keeping the 13-keyword constructor. DESIGN.md §1 defines an agent as one config
 over one loop; the code should say that, and the records make `dataclasses.replace` the
 way to vary an agent instead of re-listing every argument.

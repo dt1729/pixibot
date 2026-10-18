@@ -13,17 +13,14 @@ Contract: docs/contracts/pixibot.lib.orchestrator.md
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
 from typing import Any
 
 from ..blackboard import Blackboard
-from ..model import Model
+from ..model import ModelFactory
+from ..schema import Projection
 from .agent import ReasoningAgent, RunContext
 from .context_manager import ContextManager
 from .factory import make_agent
-
-ModelFactory = Callable[[dict[str, Any]], Model]
-Projection = dict[str, Any]
 
 # Lower rank runs first. Unknown roles default to the implementation tier.
 ROLE_RANK = {

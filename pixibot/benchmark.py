@@ -41,7 +41,7 @@ from .lib.logbook import get as _get_logger
 
 _log = _get_logger("benchmark")
 
-DEFAULT_BASE = "~/pixibot-bench"
+_DEFAULT_BASE = "~/pixibot-bench"
 
 
 @dataclass(frozen=True)
@@ -193,7 +193,7 @@ class Report:
         return json.dumps({"results": [asdict(r) for r in self.results]}, indent=2)
 
 
-def default_engines(provider_name: str, base: str = DEFAULT_BASE) -> EngineSource:
+def default_engines(provider_name: str, base: str = _DEFAULT_BASE) -> EngineSource:
     """Build engines from a provider name, one blackboard and workspace per run.
 
     Runs are kept apart on disk (``<base>/<task>-<arm>/``) so a benchmark can be
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--set", choices=("hard", "smoke"), default="hard",
                     dest="task_set", help="built-in task set (default: hard)")
     ap.add_argument("--only", help="comma-separated task ids to run")
-    ap.add_argument("--base", default=DEFAULT_BASE, help="where runs are written")
+    ap.add_argument("--base", default=_DEFAULT_BASE, help="where runs are written")
     ap.add_argument("--out", help="write the JSON results here as well as the table")
     args = ap.parse_args(argv)
     # Send the run log to a file, so a warning (e.g. no docker daemon) lands there

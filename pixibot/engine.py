@@ -14,7 +14,6 @@ Contract: docs/contracts/pixibot.engine.md
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +25,13 @@ from .lib import orchestrator, tpm
 from .lib.agent import EventHook, RunContext
 from .lib.context_manager import ActivationHook, ContextManager, StartHook
 from .lib.logbook import get as _get_logger
-from .model import Model
+from .model import Model, ModelFactory
 from .runtime import executor_for
-from .schema import compute_ceiling
+from .schema import Projection, compute_ceiling
 from .workspace import Workspace
 
 _log = _get_logger("engine")
 
-ModelFactory = Callable[[dict[str, Any]], Model]
-Projection = dict[str, Any]
 
 # Greenfield-topology adoptions, each an on/off ablation arm (decision 47).
 ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
@@ -42,10 +39,10 @@ ALL_FEATURES = frozenset({"continuous_testing", "auto_gate"})
 # Opus re-plan rounds, so it's opt-in on cost grounds. Add it to engine.features to enable.
 DEFAULT_FEATURES = frozenset({"continuous_testing"})
 
-DEFAULT_WORKSPACE_BASE = "~/pixibot-workspace"
+_DEFAULT_WORKSPACE_BASE = "~/pixibot-workspace"
 #: How many times one checkpoint may send the run back for revision before the
 #: engine stops asking. A person can always `revise` again by hand afterwards.
-DEFAULT_REVIEW_ROUNDS = 3
+_DEFAULT_REVIEW_ROUNDS = 3
 
 
 def default_input(objective: str, *, hard: bool = False) -> dict[str, Any]:
@@ -81,7 +78,7 @@ class Engine:
         self.sandbox = "auto"      # container when docker answers, else confined host
         self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
-        self.max_review_rounds = DEFAULT_REVIEW_ROUNDS  # per checkpoint (§10)
+        self.max_review_rounds = _DEFAULT_REVIEW_ROUNDS  # per checkpoint (§10)
         self._ceiling: int | None = None                # run token ceiling (§8)
         self.passed_checkpoints: list[str] = []         # ids a human has accepted
         self._settled: set[str] = set()                 # accepted, or out of rounds
@@ -90,7 +87,7 @@ class Engine:
     # -- workspace -----------------------------------------------------------
     def _new_workspace(self, run_id: str) -> Workspace:
         """A per-run workspace whose commands run in this engine's sandbox."""
-        base = self.workspace_base or str(Path(DEFAULT_WORKSPACE_BASE).expanduser())
+        base = self.workspace_base or str(Path(_DEFAULT_WORKSPACE_BASE).expanduser())
         root = str(Path(base) / run_id)
         return Workspace(root, executor_for(root, sandbox=self.sandbox))
 

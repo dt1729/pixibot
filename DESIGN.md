@@ -611,6 +611,26 @@ multi-run store); `payload` as `TEXT`; broadcast via `to_agent = '*'` supported.
     proposed a worse trade. Four of those five were partly right underneath, which is what
     makes an unrefuted finding dangerous rather than merely noisy. Findings that were never
     refuted are published as UNVERIFIED, not dropped and not promoted (incident 011).
+70. **A contract is checked against the code, not only against the format (M51):**
+    `check_contracts.py` read the contracts as documents and never opened a module, so a
+    contract could name a function that no longer existed, or forbid an import made on
+    line one, and five green gates would say nothing. `scripts/check_claims.py` parses
+    each module with `ast` and compares both directions — every declared name exists,
+    every public name is declared, every `Must not import` line is true. It found eleven
+    false claims on its first run over a repo that had just passed an audit.
+71. **A dead name is invisible to a test of behaviour (M51):** M50 removed the `Toolset`
+    parameter and attribute and left the class standing; the test it shipped passed,
+    because an unused class changes nothing (incident 012). The same run found three type
+    aliases declared in two or three modules each — `ModelFactory`, `Projection`,
+    `DEPTHS` — which is decision 67's duplication in the type system rather than in a
+    function. Each now has one home: the module that owns the thing it describes.
+72. **The contract decides what is public, not the author's reflex (M51):** ten of the
+    constants this pass flagged as undeclared were declared all along, and privatising
+    them would have shrunk the documented interface by fiat. The rule that came out of
+    it: a name another module imports is public and must be declared; a name only its own
+    module uses and no contract declares goes private; a name nothing uses at all is
+    deleted (`cli.HEAVY` was). Where the two disagree, the contract wins and the gate
+    enforces it either way.
 
 ---
 

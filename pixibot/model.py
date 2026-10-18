@@ -105,6 +105,12 @@ class Model:
 
 
 # A script item is either a fixed response or a function of the messages so far.
+#: Build a Model from an agent spec. Defined here because it returns a Model, and
+#: because the three callers that need it may not import one another: `engine` must
+#: not import `providers`, and `lib.orchestrator` must not import either. It was
+#: declared three times, identically, until M51.
+ModelFactory = Callable[[dict[str, Any]], "Model"]
+
 ScriptItem = ModelResponse | Callable[[list[Message]], ModelResponse]
 
 

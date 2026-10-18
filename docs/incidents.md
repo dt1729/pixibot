@@ -239,3 +239,30 @@ and the credible-looking severity is exactly what makes that dangerous.
 were never refuted are published as UNVERIFIED rather than quietly dropped or quietly
 promoted. The four defects fixed in M50 were each verified by hand — path resolved, grep
 run, barrier traced — before any code moved.
+
+---
+
+## 012 — A deleted seam that was still there (M50, found and fixed M51)
+
+**What happened.** M50 removed the `Toolset` injection point from `pixibot.lib.agent`:
+the constructor parameter went, the attribute went, the contract recorded why both of its
+justifications had been false. The **class itself stayed**, unused, and the comment left
+in its place said "a Toolset seam stood here until M50". The commit message said it was
+deleted. For one milestone, the repo both claimed the deletion and contained the thing.
+
+**Why it survived.** The test M50 shipped asserts the agent has no `tools` attribute and
+still carries the tool surface. That is a behavioural test, and it passed: an unused class
+changes no behaviour. ruff does not report a public class nobody calls, mypy has nothing
+to object to, and no contract declared `Toolset`, so the document gate was silent too. A
+dead name is invisible to every gate that only watches behaviour.
+
+**Prevention.** `scripts/check_claims.py` parses each module and compares its public
+top-level names with the names its contract declares, in both directions. `Toolset` was
+reported on the gate's first run as a public name no contract declares. The repo-level
+test (`tests/test_claims.py`) fails if the class is put back, which is the negative
+control that proves the gate bites rather than merely passes.
+
+**The general lesson.** M50's lesson was that a module with no contract and no test is
+invisible. This is the narrower form: a **name** with no contract and no test is
+invisible, even inside a module that has both. The check that catches it cannot be a test
+of behaviour, because there is no behaviour to test.

@@ -32,7 +32,7 @@ DEFAULT_TASKS: tuple[Task, ...]     # built to need a team
 SMOKE_TASKS: tuple[Task, ...]       # easy exercises; every arm scores the same
 EngineSource = Callable[[Task, Arm], Engine]
 
-def default_engines(provider_name: str, base: str = DEFAULT_BASE) -> EngineSource
+def default_engines(provider_name: str, base: str = "~/pixibot-bench") -> EngineSource
 def run_task(task: Task, arm: Arm, engines: EngineSource) -> Result
 def run_suite(tasks: Sequence[Task], arms: Sequence[Arm], engines: EngineSource) -> Report
 def load_tasks(path: str) -> tuple[Task, ...]

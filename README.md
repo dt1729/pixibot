@@ -175,7 +175,8 @@ The gates are not advisory — they run on every commit and must pass:
 ruff check pixibot tests          # lint: complexity 10, max-args 6, annotations required
 python3 -m mypy pixibot           # --strict, no exemptions
 lint-imports                      # the dependency directions each contract states
-python3 scripts/check_contracts.py
+python3 scripts/check_contracts.py   # every public module has a usable contract
+python3 scripts/check_claims.py      # every contract is true of its module (AST)
 python3 -m pytest -q
 ```
 

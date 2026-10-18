@@ -14,6 +14,7 @@ HELP: str
 COMMANDS: frozenset[str]        # every word the shell understands
 QUIT = "__quit__"               # sentinels a front end acts on rather than prints
 CLEAR = "__clear__"
+ACCEPTS: tuple[str, ...]        # every word that accepts a checkpoint ("", "ok", "lgtm")
 
 class EngineFactory(Protocol):
     def __call__(self, objective: str, *, hard: bool = False) -> Engine: ...
@@ -34,6 +35,7 @@ class ChatSession:
     sandbox: str                            # passed to every engine it builds
 
 def wire(bb: Blackboard, provider: Provider) -> tuple[Broker, EngineFactory]
+def ask_at_checkpoint(checkpoint: Checkpoint, gate_summary: str) -> Review
 def main(argv: list[str] | None = None) -> None
 ```
 
@@ -42,7 +44,9 @@ def main(argv: list[str] | None = None) -> None
   propagate — the front end decides whether that kills the session.
 - A first word not in `DISPATCH`/`ALIASES` is a question for the project overseer, not an
   error. That is why `COMMANDS` is exported: a front end that wants to stream a chat reply
-  needs the same test the dispatcher uses.
+  needs the same test the dispatcher uses. `ACCEPTS` and `ask_at_checkpoint` are exported
+  for the same reason: the TUI asks the human-gate question itself and must read the
+  answer the way the CLI does, or a checkpoint would mean two different things.
 - `QUIT`/`CLEAR` are returned, not acted on, because the session owns no terminal.
 - `handle` is **synchronous and blocking**: `build`, `revise` and `tell` can take minutes.
   A front end that must stay responsive runs it on another thread (the TUI does) — the
@@ -74,8 +78,12 @@ one line in the table, which is also what the completer reads.
 - **May import:** `pixibot.providers`, `pixibot.engine`, `pixibot.interaction`,
   `pixibot.observer`, `pixibot.intake`, `pixibot.schema`, `pixibot.workspace`,
   `pixibot.lib.console`, `pixibot.lib.logbook`, `pixibot.blackboard`
-- **Must not import:** `pixibot.tui` (the TUI imports the session, not the reverse),
-  `pixibot.lib.agent`, `pixibot.lib.orchestrator`
+- **Must not import:** `pixibot.lib.agent`, `pixibot.lib.orchestrator`
+- **Must not import at module scope:** `pixibot.tui` — the TUI imports the session, so a
+  module-scope import either way is a cycle. `main` imports it inside the branch that
+  launches it, and `scripts/check_claims.py` holds the distinction: a plain "must not
+  import" forbids a function-local import too, and this line is the only form that
+  permits one
 - **Imported by:** `pixibot.tui`, `pixibot.__main__`
 
 ## Errors

@@ -12,6 +12,8 @@ Turn (system, messages, tools) into a response, whichever provider is behind it.
 ```python
 Message = dict[str, Any]          # Anthropic content-block shape
 ToolDef = dict[str, Any]
+ModelFactory = Callable[[dict[str, Any]], Model]   # build a model from an agent spec
+ScriptItem = ModelResponse | Callable[[list[Message]], ModelResponse]
 SystemPrompt = str | list[dict[str, Any]]
 DeltaSink = Callable[[str], None]
 

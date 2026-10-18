@@ -10,8 +10,6 @@ Turn a validated projection into registered agents wired for dependency activati
 ## Interface
 
 ```python
-ModelFactory = Callable[[dict], Model]
-Projection = dict[str, Any]
 ROLE_RANK: dict[str, float]            # lower runs first; unknown roles = implementation tier
 
 def infer_deps(projection: Projection) -> dict[str, set[str]]
@@ -46,8 +44,11 @@ def kick(bb: Blackboard, projection: Projection) -> None
 
 ## Seam
 
-No new seam. The two it crosses are given: `ModelFactory` (from `pixibot.providers`) and
-`ContextManager` (the scheduler). This module is deliberately a composition root for one
+No new seam. The two it crosses are given: `ModelFactory` (the type from
+`pixibot.model`, an instance from `pixibot.providers`) and `ContextManager` (the
+scheduler). Both type aliases it uses — `ModelFactory` and `Projection` — were declared
+here as well as in `engine` and `providers` until M51, three identical copies that could
+have drifted apart. This module is deliberately a composition root for one
 projection — it holds policy (how dependencies are inferred, who is blinded) and no
 mechanism.
 
@@ -57,7 +58,8 @@ where an experiment is configured.
 
 ## Dependencies
 
-- **May import:** `pixibot.lib.agent`, `pixibot.lib.factory`, `pixibot.lib.context_manager`,
+- **May import:** `pixibot.model`, `pixibot.schema` (the two type aliases),
+  `pixibot.lib.agent`, `pixibot.lib.factory`, `pixibot.lib.context_manager`,
   `pixibot.blackboard`, `pixibot.model`, stdlib
 - **Must not import:** `pixibot.engine`, `pixibot.cli`, `pixibot.providers` — it is handed
   a factory, it does not choose one
