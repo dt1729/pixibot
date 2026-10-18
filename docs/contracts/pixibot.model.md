@@ -17,11 +17,20 @@ DeltaSink = Callable[[str], None]
 
 @dataclass
 class ToolCall: id: str; name: str; input: dict[str, Any]
+@dataclass(frozen=True)
+class TokenUsage:
+    input: int = 0; output: int = 0; cached_input: int = 0
+    @property
+    def total(self) -> int              # input + output; what a budget is spent against
+    def __add__(self, other: TokenUsage) -> TokenUsage
+UNKNOWN_USAGE = TokenUsage()            # the provider reported nothing
+
 @dataclass
 class ModelResponse:
     text: str = ""; tool_calls: list[ToolCall] = []
     stop_reason: str = "end_turn"       # "end_turn" | "tool_use" | "max_tokens"
     thinking: str = ""
+    usage: TokenUsage = UNKNOWN_USAGE
 
 class Model:
     def generate(self, *, system, messages, tools) -> ModelResponse
@@ -52,7 +61,14 @@ class OpenAICompatModel(Model): def __init__(self, model_id, *, base_url,
 - SDK imports are deferred to first use, so a missing provider extra costs a feature, not
   the process.
 - `MockModel` returns its script in order and a benign `(no more script)` response once
-  exhausted — a test asserts on behaviour, not on running out.
+  exhausted — a test asserts on behaviour, not on running out. A scripted response may
+  carry a `usage`, which is how budget enforcement is tested without a provider.
+- `usage` is **best effort**: a provider that reports nothing yields `UNKNOWN_USAGE`
+  (zero), and a zero total is indistinguishable from a free turn. A budget cannot be
+  enforced against a model that reports nothing, and the engine logs that rather than
+  pretending the run was free.
+- `TokenUsage.input` **includes** cached input, which is also reported separately in
+  `cached_input`. A budget is about context size, not about the bill.
 
 ## Seam
 
@@ -105,6 +121,8 @@ the run log against a named agent, which is the only place it can be attributed.
 - cache markers appear on the outgoing copy and not on the caller's messages
 - the OpenAI translation maps text, `tool_use` and `tool_result` blocks correctly
 - a tool call with unparseable arguments becomes an empty input rather than raising
+- usage is read from both provider shapes, and a missing usage object is zero not a raise
+- `TokenUsage` adds, and its total counts cached input once
 - streamed tool-call fragments are reassembled in index order
 
 ## Deletion test

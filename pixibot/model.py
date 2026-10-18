@@ -39,12 +39,40 @@ class ToolCall:
     input: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class TokenUsage:
+    """What one turn cost. `total` is what a compute budget is spent against.
+
+    Cached input is counted in `cached_input` and **also** in `input`, because a
+    budget is about context size, not about the bill.
+    """
+
+    input: int = 0
+    output: int = 0
+    cached_input: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.input + self.output
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(self.input + other.input, self.output + other.output,
+                          self.cached_input + other.cached_input)
+
+
+#: A turn whose cost the provider did not report. Distinct from a free turn:
+#: a budget cannot be enforced on a model that reports nothing, and the engine
+#: logs that rather than pretending the run was free.
+UNKNOWN_USAGE = TokenUsage()
+
+
 @dataclass
 class ModelResponse:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
-    stop_reason: str = "end_turn"  # "end_turn" | "tool_use"
+    stop_reason: str = "end_turn"  # "end_turn" | "tool_use" | "max_tokens"
     thinking: str = ""             # the model's reasoning for this turn (if exposed)
+    usage: TokenUsage = UNKNOWN_USAGE  # what the turn cost, when the provider says
 
 
 class Model:
@@ -208,6 +236,20 @@ class AnthropicModel(Model):
         return kwargs
 
     @staticmethod
+    def _usage_of(usage: Any) -> TokenUsage:
+        """The SDK's usage object as a TokenUsage. A missing field is zero, and a
+        missing object is UNKNOWN_USAGE - not an exception on a working turn."""
+        if usage is None:
+            return UNKNOWN_USAGE
+        cached = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+        written = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        return TokenUsage(
+            input=int(getattr(usage, "input_tokens", 0) or 0) + cached + written,
+            output=int(getattr(usage, "output_tokens", 0) or 0),
+            cached_input=cached,
+        )
+
+    @staticmethod
     def _log_cache(usage: Any) -> None:
         if usage is None:
             return
@@ -246,7 +288,8 @@ class AnthropicModel(Model):
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
         return ModelResponse(text=text, tool_calls=tool_calls,
-                             stop_reason=resp.stop_reason, thinking=thinking)
+                             stop_reason=resp.stop_reason, thinking=thinking,
+                             usage=self._usage_of(getattr(resp, "usage", None)))
 
     def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
                         tools: list[ToolDef],
@@ -266,7 +309,8 @@ class AnthropicModel(Model):
                 text += block.text
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(block.id, block.name, dict(block.input)))
-        return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=msg.stop_reason)
+        return ModelResponse(text=text, tool_calls=tool_calls, stop_reason=msg.stop_reason,
+                             usage=self._usage_of(getattr(msg, "usage", None)))
 
 
 class OpenAICompatModel(Model):
@@ -354,7 +398,15 @@ class OpenAICompatModel(Model):
                               "parameters": t["input_schema"]}} for t in tools]
 
     @staticmethod
-    def _parse_message(msg: Any) -> ModelResponse:
+    def _usage_of(raw: Any) -> TokenUsage:
+        """A chat-completions usage object as a TokenUsage."""
+        if raw is None:
+            return UNKNOWN_USAGE
+        return TokenUsage(input=int(getattr(raw, "prompt_tokens", 0) or 0),
+                          output=int(getattr(raw, "completion_tokens", 0) or 0))
+
+    @staticmethod
+    def _parse_message(msg: Any, usage: Any = None) -> ModelResponse:
         text = msg.content or ""
         calls: list[ToolCall] = []
         for tc in (getattr(msg, "tool_calls", None) or []):
@@ -364,7 +416,8 @@ class OpenAICompatModel(Model):
                 args = {}
             calls.append(ToolCall(tc.id, tc.function.name, args))
         return ModelResponse(text=text, tool_calls=calls,
-                             stop_reason="tool_use" if calls else "end_turn")
+                             stop_reason="tool_use" if calls else "end_turn",
+                             usage=OpenAICompatModel._usage_of(usage))
 
     def generate(self, *, system: SystemPrompt, messages: list[Message],
                  tools: list[ToolDef]) -> ModelResponse:
@@ -373,7 +426,8 @@ class OpenAICompatModel(Model):
             model=self.model_id, max_tokens=self.max_tokens,
             messages=self._to_messages(system, messages), tools=self._to_tools(tools),
         )
-        return self._parse_message(resp.choices[0].message)
+        return self._parse_message(resp.choices[0].message,
+                                   getattr(resp, "usage", None))
 
     def stream_generate(self, *, system: SystemPrompt, messages: list[Message],
                         tools: list[ToolDef],

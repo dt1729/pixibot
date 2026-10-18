@@ -36,6 +36,7 @@ STATE_SPAWNED = "SPAWNED"
 STATE_ACTIVE = "ACTIVE"
 STATE_DONE = "DONE"
 STATE_BLOCKED = "BLOCKED"
+STATE_BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"   # spent its compute ceiling (§9)
 
 ROUTER = "context-manager"  # from_agent used for dependency-ready notifications
 
@@ -67,6 +68,17 @@ class ContextManager:
     def completed(self) -> frozenset[str]:
         """The agents that have finished a turn in state DONE."""
         return frozenset(self._done)
+
+    def spent(self) -> int:
+        """Tokens every registered agent has spent so far, as far as the models
+        reported. An agent whose runner is not a ReasoningAgent counts zero."""
+        total = 0
+        for runner in self._runners.values():
+            agent = getattr(runner, "__self__", None)
+            spent = getattr(agent, "spent", None)
+            if spent is not None:
+                total += int(spent.total)
+        return total
 
     def add_dependency(self, section_pattern: str, reader_agent_id: str) -> None:
         """Reader activates when an artifact is written to a matching section."""

@@ -24,6 +24,7 @@ class AgentSpec:                 # who one agent is
     reads: tuple[str, ...] = ()          # sections pulled into context
     read_denylist: tuple[str, ...] = ()  # sections it may not read (adoption D)
     max_iters: int = 14
+    compute_budget: int | None = None    # token ceiling for this agent (§8)
 
 @dataclass(frozen=True)
 class RunContext:                # what every agent in one run shares
@@ -39,6 +40,9 @@ class Toolset:                   # how an agent affects the world
 class ReasoningAgent:
     def __init__(self, spec: AgentSpec, run: RunContext | None = None, tools: Toolset | None = None)
     agent_id: str; role: str | None; workspace: Workspace | None; read_denylist: tuple[str, ...]
+    spent: TokenUsage                    # this run's tokens, across every activation
+    @property
+    def over_budget(self) -> bool
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str
 ```
 
@@ -58,6 +62,15 @@ class ReasoningAgent:
   `tool_use`, so no `tool_use` block is ever persisted without its `tool_result` (the API
   rejects that pairing).
 - `max_iters` bounds model turns per activation; the nudge pass gets `max(4, max_iters//2)`.
+- `compute_budget` bounds the agent across **the whole run**, not per activation. The loop
+  stops as soon as the ceiling is reached, an activation that starts with nothing left
+  opens no model turn at all, and either way the terminal state is `BUDGET_EXHAUSTED`
+  (DESIGN.md §9 named that state at M1; this is what finally sets it).
+- An agent with `compute_budget=None` is **never** over budget: a missing budget means the
+  projection did not set one, not that the agent may spend nothing.
+- A spent agent is not nudged for a deliverable: the nudge costs a turn it cannot pay for.
+- `spent` is only as good as what the provider reports (see `pixibot.model`): against a
+  model that reports no usage, the ceiling never trips.
 - A tool that raises returns its error text to the model instead of failing the turn: the
   model is expected to read and recover.
 
@@ -125,6 +138,10 @@ to the model as text, which is the only one the model can act on.
 - a truncated write is retried and then succeeds
 - endless truncation stops at the bound rather than spinning
 - an unknown tool name is reported to the model, not raised
+- an agent counts what its turns cost, and one with no ceiling is never over budget
+- reaching the ceiling ends the activation as `BUDGET_EXHAUSTED`
+- the loop stops at the ceiling rather than at `max_iters`
+- a spent agent that is re-activated opens no model turn
 
 ## Deletion test
 

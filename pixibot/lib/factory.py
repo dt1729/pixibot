@@ -165,6 +165,25 @@ def build_system_prompt(role: str, depth: str) -> str:
     ) if p)
 
 
+def _compute_ceiling(budget: dict[str, Any]) -> int | None:
+    """The agent's token ceiling, or None when the projection did not set one.
+
+    The TPM writes this field, so it arrives as whatever a model felt like
+    emitting: an int, "40000", "40k" or nonsense. Anything unreadable is None -
+    an unenforceable budget must not become a zero one.
+    """
+    raw = budget.get("compute")
+    if raw is None:
+        return None
+    try:
+        ceiling = int(float(str(raw).strip().rstrip("kK") or 0))
+    except (TypeError, ValueError):
+        return None
+    if str(raw).strip().lower().endswith("k"):
+        ceiling *= 1000
+    return ceiling if ceiling > 0 else None
+
+
 def agent_spec(spec: dict[str, Any], model: Model, *,
                read_denylist: tuple[str, ...] = ()) -> AgentSpec:
     """Turn one projection agent-spec into an AgentSpec (DESIGN.md §5/§7).
@@ -177,6 +196,7 @@ def agent_spec(spec: dict[str, Any], model: Model, *,
     depth = budget.get("depth", "senior")
     role = spec.get("role", "specialist")
     return AgentSpec(
+        compute_budget=_compute_ceiling(budget),
         agent_id=spec["id"],
         model=model,
         system_prompt=build_system_prompt(role, depth),

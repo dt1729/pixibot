@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..blackboard import KIND_ARTIFACT, KIND_CONTROL, KIND_MESSAGE, Blackboard, Event
-from ..model import Model, ModelResponse, ToolCall
-from .context_manager import STATE_DONE
+from ..model import Model, ModelResponse, TokenUsage, ToolCall
+from .context_manager import STATE_BUDGET_EXHAUSTED, STATE_DONE
 from .logbook import get as _get_logger
 from .tools import DEFAULT_TOOL_DEFS, default_tool_impls
 
@@ -52,6 +52,7 @@ class AgentSpec:
     reads: tuple[str, ...] = ()          # sections pulled into its context
     read_denylist: tuple[str, ...] = ()  # sections it may NOT read (adoption D)
     max_iters: int = 14
+    compute_budget: int | None = None    # token ceiling for this agent (§8, decision 14)
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class ReasoningAgent:
         self.spec = spec
         self.run = run or RunContext()
         self.tools = tools or Toolset()
+        self.spent = TokenUsage()   # this run's tokens, across every activation
 
     # Attributes the harness reads off an agent (tool impls, scheduler, tests).
     @property
@@ -100,6 +102,16 @@ class ReasoningAgent:
     @property
     def read_denylist(self) -> tuple[str, ...]:
         return self.spec.read_denylist
+
+    @property
+    def over_budget(self) -> bool:
+        """True once this agent has spent its compute ceiling.
+
+        An agent with no ceiling is never over budget: a missing budget means
+        the projection did not set one, not that the agent may spend nothing.
+        """
+        ceiling = self.spec.compute_budget
+        return ceiling is not None and self.spent.total >= ceiling
 
     # -- context rebuild (stateless) -----------------------------------------
     def _initial_messages(self, bb: Blackboard, events: list[Event]) -> list[dict[str, Any]]:
@@ -164,13 +176,18 @@ class ReasoningAgent:
         "now.")
 
     def runner(self, bb: Blackboard, agent_id: str, events: list[Event]) -> str:
+        if self.over_budget:
+            # Already spent: do not open a model turn at all (decision 14).
+            _log.warning("%s: activated with no budget left (%d/%s)", agent_id,
+                         self.spent.total, self.spec.compute_budget)
+            return STATE_BUDGET_EXHAUSTED
         ws = self.run.workspace
         before = ws.snapshot() if ws is not None else None
         messages = self._resume_or_start(bb, agent_id, events)
         last_text = self._tool_loop(bb, messages, self.spec.max_iters)
         # Guarantee delivery: if a producing role wrote nothing — whether it stopped
         # early OR ran out of iterations exploring — force one dedicated delivery pass.
-        if self._needs_nudge(bb, before):
+        if not self.over_budget and self._needs_nudge(bb, before):
             messages.append({"role": "user", "content": self._NUDGE})
             _log.warning("%s: NUDGE — no file produced, forcing a delivery pass", self.agent_id)
             self._emit("say", "(nudged: no file produced — forcing deliverable)")
@@ -178,7 +195,7 @@ class ReasoningAgent:
         self._persist_memory(bb, messages)
         self._log_file_changes(bb, before)
         self._report_completion(bb, before, last_text)
-        return STATE_DONE
+        return STATE_BUDGET_EXHAUSTED if self.over_budget else STATE_DONE
 
     def _resume_or_start(self, bb: Blackboard, agent_id: str,
                          events: list[Event]) -> list[dict[str, Any]]:
@@ -209,9 +226,11 @@ class ReasoningAgent:
         except Exception:
             _log.exception("%s: model.generate failed on turn %d", self.agent_id, turn)
             raise
-        _log.info("%s turn %d: stop=%s tools=%d text=%dc think=%dc",
+        self.spent = self.spent + resp.usage
+        _log.info("%s turn %d: stop=%s tools=%d text=%dc think=%dc tokens=%d/%s",
                   self.agent_id, turn, resp.stop_reason, len(resp.tool_calls),
-                  len(resp.text), len(resp.thinking))
+                  len(resp.text), len(resp.thinking), self.spent.total,
+                  self.spec.compute_budget or "unbounded")
         return resp
 
     def _observe(self, bb: Blackboard, resp: ModelResponse) -> None:
@@ -264,6 +283,11 @@ class ReasoningAgent:
                 messages.append({"role": "user", "content": self._TRUNCATED})
                 continue
             if resp.stop_reason != "tool_use" or not resp.tool_calls:
+                return last_text
+            if self.over_budget:
+                # Stop mid-loop rather than start a turn that cannot be paid for.
+                _log.warning("%s: compute budget spent (%d/%s) - stopping",
+                             self.agent_id, self.spent.total, self.spec.compute_budget)
                 return last_text
         return last_text
 

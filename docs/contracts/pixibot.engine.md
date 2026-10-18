@@ -27,6 +27,8 @@ class Engine:
     # state
     workspace: Workspace | None; projection: dict | None; last_gate: GateReport | None
 
+    def spent(self) -> int                  # tokens this run reported
+    def within_budget(self) -> bool         # False once the ceiling is reached
     def build(self, inp: dict) -> dict
     def build_objective(self, objective: str, *, hard: bool = False) -> dict
     def gate(self) -> GateReport
@@ -39,8 +41,15 @@ class Engine:
 - `build` is **destructive of nothing**: it allocates a fresh `run_id` and a fresh
   workspace directory, so a rebuild cannot overwrite an earlier run's files (decision 45).
   Prior runs stay on disk.
-- `build` returns `{"projection", "steps", "workspace", "run_id"}`, plus
-  `{"gate_passed", "gate"}` when the `auto_gate` arm is on and the project was checkable.
+- `build` returns `{"projection", "steps", "workspace", "run_id", "tokens", "budget"}`,
+  plus `{"gate_passed", "gate"}` when the `auto_gate` arm is on and the project was
+  checkable.
+- The run's ceiling is `inp["budget_ceilings"]["compute"]` (decision 14). The scheduler
+  asks `within_budget()` after **every** activation, so a run stops at its ceiling rather
+  than at `max_steps`. An absent or unreadable ceiling is `None` — unbounded — because a
+  budget nobody can parse must not stop a run before it starts.
+- Per-agent ceilings are the projection's `agents[].budget.compute` and are enforced by
+  the agent itself; the run ceiling is the backstop for a plan that over-allocates.
 - `tell` and `revise` are **non-blocking in the agent's sense**: they post to the
   blackboard and resume the scheduler; no agent is interrupted mid-turn (§12).
 - `revise` requires a prior `build` (it needs a projection to revise) and only registers
@@ -116,6 +125,10 @@ continues, which is what keeps one bad activation from losing the whole build.
 - `gate()` on a green suite passes and names the language
 - `gate()` on a red suite fails and its summary names the failing test
 - a C/C++ workspace is gated with cmake/ctest commands, not pytest
+- a run reports what it spent, and `tokens` matches `spent()`
+- a run with no ceiling is always within budget
+- a ceiling smaller than one agent turn stops the cascade before every section is written
+- an unreadable ceiling leaves the run unbounded
 
 ## Deletion test
 

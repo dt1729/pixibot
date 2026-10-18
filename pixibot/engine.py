@@ -81,6 +81,7 @@ class Engine:
         self.features = set(DEFAULT_FEATURES)  # toggleable adoption arms; auto_gate opt-in
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
         self.max_review_rounds = DEFAULT_REVIEW_ROUNDS  # per checkpoint (§10)
+        self._ceiling: int | None = None                # run token ceiling (§8)
         self.passed_checkpoints: list[str] = []         # ids a human has accepted
         self._settled: set[str] = set()                 # accepted, or out of rounds
         self.last_gate: GateReport | None = None   # the most recent gate run
@@ -98,6 +99,33 @@ class Engine:
         return self.workspace
 
     # -- build ---------------------------------------------------------------
+    def _ceiling_of(self, inp: dict[str, Any]) -> int | None:
+        """The run's token ceiling from budget_ceilings.compute, or None.
+
+        Unreadable is None rather than zero: a budget nobody can parse must not
+        stop a run before it starts (decision 14).
+        """
+        raw = (inp.get("budget_ceilings") or {}).get("compute")
+        if raw is None:
+            return None
+        try:
+            ceiling = int(float(str(raw).strip().rstrip("kK") or 0))
+        except (TypeError, ValueError):
+            return None
+        if str(raw).strip().lower().endswith("k"):
+            ceiling *= 1000
+        return ceiling if ceiling > 0 else None
+
+    def spent(self) -> int:
+        """Tokens this run has spent, as far as the models reported."""
+        return self.cm.spent() if self.cm else 0
+
+    def within_budget(self) -> bool:
+        """False once the run has spent its ceiling. The scheduler asks this
+        after every activation, so a run stops at the ceiling rather than at
+        max_steps."""
+        return self._ceiling is None or self.spent() < self._ceiling
+
     def build(self, inp: dict[str, Any], *,
               reviewer: Reviewer | None = None) -> dict[str, Any]:
         """Plan a team for `inp`, run it to quiescence, and report what happened.
@@ -116,6 +144,7 @@ class Engine:
         _log.info("BUILD start run=%s objective=%r ws=%s",
                   run_id, inp.get("objective"), self.workspace.root)
 
+        self._ceiling = self._ceiling_of(inp)
         self.projection = tpm.plan(inp, self.tpm_model)
         _log.info("BUILD run=%s agents=%s", run_id,
                   [a["id"] for a in self.projection.get("agents", [])])
@@ -135,15 +164,20 @@ class Engine:
         if reviewer is not None:
             steps, gate = self._drive_with_reviews(run_id, reviewer)
         else:
-            steps = self.cm.run()
+            steps = self.cm.run(barrier=self._budget_barrier)
             if "auto_gate" in self.features:
                 steps, gate = self._gate_loop(run_id, steps)
 
-        _log.info("BUILD done run=%s steps=%d files=%d gate=%s",
-                  run_id, steps, len(self.workspace.list_files()),
-                  gate.passed if gate else "n/a")
+        spent = self.spent()
+        if self._ceiling is not None and spent >= self._ceiling:
+            _log.warning("BUILD run=%s stopped on its compute ceiling (%d/%d)",
+                         run_id, spent, self._ceiling)
+        _log.info("BUILD done run=%s steps=%d files=%d tokens=%d/%s gate=%s",
+                  run_id, steps, len(self.workspace.list_files()), spent,
+                  self._ceiling or "unbounded", gate.passed if gate else "n/a")
         res: dict[str, Any] = {"projection": self.projection, "steps": steps,
-                               "workspace": self.workspace.root, "run_id": run_id}
+                               "workspace": self.workspace.root, "run_id": run_id,
+                               "tokens": spent, "budget": self._ceiling}
         if gate is not None:
             res["gate_passed"], res["gate"] = gate.passed, gate
         return res
@@ -196,8 +230,14 @@ class Engine:
                                only_triggered=only_triggered)
 
     def _due_now(self, agent_id: str) -> bool:  # noqa: ARG002 - the barrier signature
-        """Scheduler barrier: pause the run when a human checkpoint falls due."""
+        """Scheduler barrier: pause when a checkpoint falls due, or the run is spent."""
+        if not self.within_budget():
+            return False
         return not any(cp.human for cp in self.pending_checkpoints(only_triggered=True))
+
+    def _budget_barrier(self, agent_id: str) -> bool:  # noqa: ARG002 - barrier signature
+        """Scheduler barrier for an unattended run: stop at the ceiling."""
+        return self.within_budget()
 
     def _drive_with_reviews(self, run_id: str,
                             reviewer: Reviewer) -> tuple[int, GateReport | None]:

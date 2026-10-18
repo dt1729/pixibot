@@ -4,10 +4,25 @@ import shutil
 import tempfile
 import unittest
 
-from pixibot.engine import Engine
+from pixibot.engine import Engine, default_input
 from pixibot.lib import mockrun
+from pixibot.model import MockModel, ModelResponse, TokenUsage, ToolCall
 
 from .support import WithBlackboard
+
+
+def costed_factory():
+    """Scripted agents whose turns report 200 tokens each, so a ceiling bites."""
+    def factory(spec):
+        section = spec["blackboard"]["writes"][0]
+        usage = TokenUsage(input=100, output=100)
+        return MockModel([
+            ModelResponse(tool_calls=[ToolCall("t", "write_artifact",
+                                               {"section": section, "content": "x"})],
+                          stop_reason="tool_use", usage=usage),
+            ModelResponse(text="done", stop_reason="end_turn", usage=usage),
+        ])
+    return factory
 
 
 class EngineTest(WithBlackboard, unittest.TestCase):
@@ -94,6 +109,54 @@ class EngineTest(WithBlackboard, unittest.TestCase):
         self.engine.revise("add API docs")
         self.assertIsNotNone(self.bb.read_section("docs/f1"))
         self.assertIn("docs-f1", [a["agent_id"] for a in self.bb.list_agents()])
+
+
+class RunBudgetTest(WithBlackboard, unittest.TestCase):
+    run_id = "rbud"
+
+    def setUp(self):
+        super().setUp()
+        self.wsdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.wsdir, True)
+
+    def engine(self):
+        eng = Engine(self.bb, mockrun.mock_tpm_model("thing"), costed_factory())
+        eng.workspace_base = self.wsdir
+        return eng
+
+    def test_a_run_reports_what_it_spent(self):
+        eng = self.engine()
+        res = eng.build_objective("thing")
+        self.assertGreater(res["tokens"], 0)
+        self.assertEqual(res["tokens"], eng.spent())
+
+    def test_a_run_with_no_ceiling_is_always_within_budget(self):
+        eng = self.engine()
+        inp = default_input("thing")
+        inp["budget_ceilings"].pop("compute")
+        eng.build(inp)
+        self.assertTrue(eng.within_budget())
+        self.assertIsNone(eng.build(inp)["budget"])
+
+    def test_a_tiny_ceiling_stops_the_run(self):
+        eng = self.engine()
+        inp = default_input("thing")
+        inp["budget_ceilings"]["compute"] = 150     # one agent turn is 200
+        res = eng.build(inp)
+        self.assertEqual(res["budget"], 150)
+        self.assertFalse(eng.within_budget())
+        # the cascade stopped early: not every section was written
+        written = [s for s in ("topology", "impl/f1", "tests/f1")
+                   if self.bb.read_section(s) is not None]
+        self.assertLess(len(written), 3, f"the run spent its ceiling but wrote {written}")
+
+    def test_an_unreadable_ceiling_does_not_stop_the_run(self):
+        eng = self.engine()
+        inp = default_input("thing")
+        inp["budget_ceilings"]["compute"] = "as much as it takes"
+        res = eng.build(inp)
+        self.assertIsNone(res["budget"])
+        self.assertTrue(eng.within_budget())
 
 
 if __name__ == "__main__":

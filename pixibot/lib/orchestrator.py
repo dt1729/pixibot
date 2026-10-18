@@ -79,7 +79,11 @@ def register_one(spec: dict[str, Any], cm: ContextManager, model_factory: ModelF
 
 def materialize(projection: Projection, cm: ContextManager, model_factory: ModelFactory,
                 run: RunContext | None = None, *, continuous: bool = True) -> ContextManager:
-    """Register every agent in the projection, wired for dependency activation."""
+    """Register every agent in the projection, wired for dependency activation.
+
+    The agents are registered with the scheduler, which owns them from here; the
+    caller reads their spend through :meth:`ContextManager.spent`.
+    """
     run = run or RunContext()
     if not run.objective:
         run = dataclasses.replace(run, objective=projection.get("plan_summary", ""))
