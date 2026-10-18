@@ -74,5 +74,49 @@ class ContextManagerTest(WithBlackboard, unittest.TestCase):
         self.assertEqual(self.cm.run(), 0)  # nobody kicked -> zero steps
 
 
+class BarrierTest(WithBlackboard, unittest.TestCase):
+    run_id = "bar"
+
+    def _agent(self, name, order):
+        def runner(bb, agent_id, events):
+            order.append(agent_id)
+            return STATE_DONE
+        return runner
+
+    def test_a_barrier_pauses_the_pass_and_the_rest_keep_their_events(self):
+        order = []
+        cm = ContextManager(self.bb, max_steps=10)
+        for name in ("a", "b", "c"):
+            cm.register(name, self._agent(name, order))
+            self.bb.send("tpm", "go", to=name)
+
+        cm.run(barrier=lambda agent_id: False)      # pause after the first one
+        self.assertEqual(len(order), 1)
+        self.assertTrue(cm.paused)
+
+        cm.run()                                    # resume: the other two still run
+        self.assertEqual(len(order), 3)
+        self.assertFalse(cm.paused)
+
+    def test_no_barrier_runs_to_quiescence(self):
+        order = []
+        cm = ContextManager(self.bb, max_steps=10)
+        for name in ("a", "b"):
+            cm.register(name, self._agent(name, order))
+            self.bb.send("tpm", "go", to=name)
+        cm.run()
+        self.assertEqual(sorted(order), ["a", "b"])
+        self.assertFalse(cm.paused)
+
+    def test_a_barrier_that_allows_everything_does_not_pause(self):
+        order = []
+        cm = ContextManager(self.bb, max_steps=10)
+        cm.register("a", self._agent("a", order))
+        self.bb.send("tpm", "go", to="a")
+        cm.run(barrier=lambda agent_id: True)
+        self.assertEqual(order, ["a"])
+        self.assertFalse(cm.paused)
+
+
 if __name__ == "__main__":
     unittest.main()

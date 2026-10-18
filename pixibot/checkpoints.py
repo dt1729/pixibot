@@ -79,13 +79,18 @@ def parse(projection: Mapping[str, Any]) -> tuple[Checkpoint, ...]:
 
 
 def due(checkpoints: Iterable[Checkpoint], completed: Iterable[str],
-        *, already_passed: Iterable[str] = ()) -> tuple[Checkpoint, ...]:
-    """The checkpoints whose agents have all finished and which have not been passed.
+        *, already_passed: Iterable[str] = (),
+        only_triggered: bool = False) -> tuple[Checkpoint, ...]:
+    """The checkpoints whose agents have all finished and which are not settled.
 
-    A checkpoint with no ``after`` is due as soon as the run quiesces: the TPM
-    left the trigger open, and the honest reading is "at the end".
+    A checkpoint with no ``after`` is due at quiescence: the TPM left the trigger
+    open, and the honest reading is "at the end". Pass ``only_triggered=True`` to
+    exclude those - the scheduler asks that way, because a trigger-less
+    checkpoint must not stop the run before the team has finished.
     """
     done = set(completed)
-    passed = set(already_passed)
+    settled = set(already_passed)
     return tuple(cp for cp in checkpoints
-                 if cp.id not in passed and set(cp.after) <= done)
+                 if cp.id not in settled
+                 and set(cp.after) <= done
+                 and not (only_triggered and not cp.after))

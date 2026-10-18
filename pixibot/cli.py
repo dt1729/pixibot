@@ -467,8 +467,9 @@ def _build_session(args: argparse.Namespace, bb: Blackboard) -> tuple[ChatSessio
         session.progress_start = _progress_start
         session.on_build_start = _planning_line
     if args.review and sys.stdin.isatty():
-        # The checkpoint pause needs a person at a terminal; piped input would
-        # answer every demo with EOF.
+        # A checkpoint needs a person. Piped input would answer every demo with
+        # EOF, so --review is ignored without a terminal. The TUI replaces this
+        # with its own pane reviewer, because Textual owns stdin.
         session.reviewer = ask_at_checkpoint
     return session, provider
 

@@ -24,6 +24,10 @@ _log = _get_logger("cm")
 
 # runner(bb, agent_id, events) -> terminal lifecycle state (defaults to DONE)
 AgentRunner = Callable[[Blackboard, str, list[Event]], str | None]
+# barrier(agent_id) is called after each activation; return False to pause the run.
+# The agents not yet polled in that pass keep their inbox events, so a paused run
+# resumes exactly where it stopped.
+Barrier = Callable[[str], bool]
 # on_agent_start(agent_id); on_activation(agent_id, terminal_state, sections_written)
 StartHook = Callable[[str], None]
 ActivationHook = Callable[[str, str, list[str | None]], None]
@@ -47,6 +51,7 @@ class ContextManager:
         self._notified: set[tuple[int, str]] = set()       # (artifact_event_id, reader_id)
         self._deps: dict[str, set[str]] = {}               # agent_id -> agent_ids it needs
         self._done: set[str] = set()                       # agents that have completed
+        self._paused = False                               # the barrier stopped a run
         # Optional live-progress hooks.
         self.on_activation: ActivationHook | None = None
         self.on_agent_start: StartHook | None = None
@@ -91,7 +96,7 @@ class ContextManager:
                     self._notified.add((e.id, reader))
 
     # -- the loop ------------------------------------------------------------
-    def step(self) -> int:
+    def step(self, barrier: Barrier | None = None) -> int:
         activated = 0
         for agent_id, runner in list(self._runners.items()):
             events = self.bb.poll_inbox(agent_id)
@@ -118,6 +123,10 @@ class ContextManager:
             if terminal == STATE_DONE:
                 self._done.add(agent_id)
                 self._wake_dependents(agent_id)
+            if barrier is not None and not barrier(agent_id):
+                self._paused = True
+                _log.info("pause after %s (barrier)", agent_id)
+                break
         return activated
 
     def _wake_dependents(self, completed_id: str) -> None:
@@ -128,11 +137,23 @@ class ContextManager:
             if completed_id in deps and deps <= self._done:
                 self.bb.send(ROUTER, "ready: dependencies complete", to=aid)
 
-    def run(self) -> int:
-        """Drive activation until quiescence or the step budget (resumable)."""
+    def run(self, *, barrier: Barrier | None = None) -> int:
+        """Drive activation until quiescence, a pause, or the step budget.
+
+        Resumable: call it again after new events arrive, or after the caller has
+        dealt with whatever the barrier paused for.
+        """
         steps = 0
+        self._paused = False
         while steps < self.max_steps:
-            if self.step() == 0:
+            if self.step(barrier) == 0:
                 break
             steps += 1
+            if self._paused:
+                break
         return steps
+
+    @property
+    def paused(self) -> bool:
+        """True when the last run stopped on the barrier rather than on quiescence."""
+        return self._paused

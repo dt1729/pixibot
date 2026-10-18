@@ -33,6 +33,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
@@ -46,7 +47,8 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Footer, Input, RichLog, Static
 
-from .cli import COMMANDS, ChatSession
+from .checkpoints import Checkpoint, Review
+from .cli import ACCEPTS, COMMANDS, ChatSession
 from .lib import completion
 from .lib.logbook import get as _get_logger
 
@@ -206,6 +208,9 @@ class PixibotApp(App):  # type: ignore[type-arg]
         self.agent_order: list[str] = []
         self.agent_states: dict[str, str] = {}
         self._zoomed: str | None = None
+        self._review_answer: Review | None = None
+        self._review_ready = threading.Event()
+        self._awaiting_review = False
 
     # ── layout ──────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -249,6 +254,10 @@ class PixibotApp(App):  # type: ignore[type-arg]
             self._agent_done, aid, terminal, files)
         s.on_event = lambda aid, kind, detail: self.call_from_thread(
             self._agent_event, aid, kind, detail)
+        if s.reviewer is not None:
+            # cli.ask_at_checkpoint reads stdin, which Textual owns. Review in a
+            # pane instead: the worker waits on an event, the UI stays live.
+            s.reviewer = self._pane_reviewer
 
     def watch_left_pct(self, v: int) -> None:
         with contextlib.suppress(Exception):   # a resize before mount is harmless
@@ -394,6 +403,31 @@ class PixibotApp(App):  # type: ignore[type-arg]
             listdir=listdir,
         ))
 
+    # ── the checkpoint review (worker waits, UI asks) ───────────────────────
+    def _pane_reviewer(self, checkpoint: Checkpoint, gate_summary: str) -> Review:
+        """Called on the worker thread. Shows the demo, then blocks until the
+        person answers in the shell pane. The UI thread is never blocked."""
+        self._review_answer = None
+        self._review_ready.clear()
+        self.call_from_thread(self._ask_review, checkpoint, gate_summary)
+        self._review_ready.wait()
+        return self._review_answer or Review.accept()
+
+    def _ask_review(self, checkpoint: Checkpoint, gate_summary: str) -> None:
+        self._awaiting_review = True
+        self._shell(f"[b magenta]── checkpoint {checkpoint.id} ──[/]")
+        self._shell(f"demo: {checkpoint.demo}")
+        self._shell(f"[dim]gate: {gate_summary}[/]")
+        self._shell("[b]accept[/] to accept, or type what to change")
+
+    def _answer_review(self, line: str) -> None:
+        self._awaiting_review = False
+        self._review_answer = (Review.accept() if line.lower() in ACCEPTS
+                               else Review.revise(line))
+        self._shell("[dim]accepted[/]" if self._review_answer.accepted
+                    else f"[dim]revising: {line}[/]")
+        self._review_ready.set()
+
     # ── live build hooks (called from the worker via call_from_thread) ───────
     def _set_build_title(self, objective: str) -> None:
         self.build_title = objective
@@ -427,6 +461,9 @@ class PixibotApp(App):  # type: ignore[type-arg]
         line = event.value.strip()
         event.input.value = ""
         if not line:
+            return
+        if self._awaiting_review:
+            self._answer_review(line)
             return
         self.query_one("#cmd", CommandInput).remember(line)
         self._shell(f"[b]pixibot:/{self.session.cwd} ›[/] {line}")  # noqa: RUF001 - a prompt chevron, not an operator

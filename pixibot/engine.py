@@ -82,6 +82,7 @@ class Engine:
         self.max_gate_revises = 2  # bound on auto-replan rounds (adoption E)
         self.max_review_rounds = DEFAULT_REVIEW_ROUNDS  # per checkpoint (§10)
         self.passed_checkpoints: list[str] = []         # ids a human has accepted
+        self._settled: set[str] = set()                 # accepted, or out of rounds
         self.last_gate: GateReport | None = None   # the most recent gate run
 
     # -- workspace -----------------------------------------------------------
@@ -127,14 +128,16 @@ class Engine:
             RunContext(workspace=self.workspace, on_event=self.on_event, objective=objective),
             continuous=("continuous_testing" in self.features))
         orchestrator.kick(self.bb, self.projection)
-        steps = self.cm.run()
 
         self.passed_checkpoints = []
+        self._settled = set()
         gate: GateReport | None = None
         if reviewer is not None:
-            steps, gate = self._review_loop(run_id, steps, reviewer)
-        elif "auto_gate" in self.features:
-            steps, gate = self._gate_loop(run_id, steps)
+            steps, gate = self._drive_with_reviews(run_id, reviewer)
+        else:
+            steps = self.cm.run()
+            if "auto_gate" in self.features:
+                steps, gate = self._gate_loop(run_id, steps)
 
         _log.info("BUILD done run=%s steps=%d files=%d gate=%s",
                   run_id, steps, len(self.workspace.list_files()),
@@ -179,46 +182,84 @@ class Engine:
         return steps, report
 
     # -- the human gate (§10: mechanical first, demo second) -----------------
-    def pending_checkpoints(self) -> tuple[Checkpoint, ...]:
-        """Declared checkpoints whose agents have finished and that nobody has passed."""
+    def pending_checkpoints(self, *, only_triggered: bool = False) -> tuple[Checkpoint, ...]:
+        """Declared checkpoints whose agents have finished and that are not settled.
+
+        A settled checkpoint is one a person accepted, or one that ran out of
+        review rounds. `only_triggered` excludes checkpoints with no `after`,
+        which are due at quiescence and must not pause the run early.
+        """
         if not self.projection or not self.cm:
             return ()
         return checkpoints.due(checkpoints.parse(self.projection), self.cm.completed(),
-                               already_passed=self.passed_checkpoints)
+                               already_passed=self._settled,
+                               only_triggered=only_triggered)
 
-    def _review_loop(self, run_id: str, steps: int,
-                     reviewer: Reviewer) -> tuple[int, GateReport | None]:
-        """Gate, demo, and act on the verdict, for each due checkpoint in turn."""
+    def _due_now(self, agent_id: str) -> bool:  # noqa: ARG002 - the barrier signature
+        """Scheduler barrier: pause the run when a human checkpoint falls due."""
+        return not any(cp.human for cp in self.pending_checkpoints(only_triggered=True))
+
+    def _drive_with_reviews(self, run_id: str,
+                            reviewer: Reviewer) -> tuple[int, GateReport | None]:
+        """Activate the team, and stop at each checkpoint as it falls due (§10).
+
+        The scheduler pauses on the activation that completes a checkpoint's
+        agents, so a demo arrives while the rest of the team has not run yet.
+        One pass per checkpoint, plus one for quiescence, bounds the loop: every
+        pass either settles a checkpoint or finds none due.
+        """
+        total = len(checkpoints.parse(self.projection or {})) + 1
+        steps = 0
         report: GateReport | None = None
-        for cp in self.pending_checkpoints():
-            if not cp.human:
-                continue   # a mechanical-only checkpoint is the gate loop's business
-            for round_no in range(self.max_review_rounds + 1):
+        for _ in range(total):
+            steps += self.cm.run(barrier=self._due_now) if self.cm else 0
+            due = [cp for cp in self.pending_checkpoints() if cp.human]
+            if not due:
+                break
+            for cp in due:
+                spent, report = self._review_one(run_id, cp, reviewer)
+                steps += spent
+        return steps, report
+
+    def _settle(self, cp: Checkpoint, *, accepted: bool) -> None:
+        self._settled.add(cp.id)
+        if accepted:
+            self.passed_checkpoints.append(cp.id)
+
+    def _review_one(self, run_id: str, cp: Checkpoint,
+                    reviewer: Reviewer) -> tuple[int, GateReport]:
+        """Gate, demo, verdict - for one checkpoint, bounded by max_review_rounds."""
+        steps = 0
+        report = self.gate()
+        for round_no in range(self.max_review_rounds + 1):
+            last = round_no == self.max_review_rounds
+            _log.info("CHECKPOINT run=%s cp=%s round=%d gate=%s", run_id, cp.id, round_no,
+                      report.passed if report.applicable else "n/a")
+            if report.applicable and not report.passed:
+                # A red gate never reaches a person (decision 33): the failures go
+                # back to the team instead, while rounds remain.
+                if last:
+                    self._settle(cp, accepted=False)
+                    return steps, report
+                steps += self.revise("mechanical gate failed - fix these:" + chr(10)
+                                     + report.summary())
                 report = self.gate()
-                _log.info("CHECKPOINT run=%s cp=%s round=%d gate=%s", run_id, cp.id,
-                          round_no, report.passed if report.applicable else "n/a")
-                if report.applicable and not report.passed:
-                    # A red suite never reaches a person (decision 33): send the
-                    # failures back to the team instead, while rounds remain.
-                    if round_no == self.max_review_rounds:
-                        break
-                    steps += self.revise("mechanical gate failed — fix these:" + chr(10)
-                                         + report.summary())
-                    continue
-                review = reviewer(cp, report.summary() if report.applicable
-                                  else "no mechanical checks apply")
-                self.bb.send("user", f"[checkpoint {cp.id}] "
-                             + ("accepted" if review.accepted else f"revise: {review.feedback}"),
-                             kind=KIND_CONTROL)
-                if review.accepted:
-                    self.passed_checkpoints.append(cp.id)
-                    _log.info("CHECKPOINT run=%s cp=%s accepted", run_id, cp.id)
-                    break
-                if round_no == self.max_review_rounds:
-                    _log.warning("CHECKPOINT run=%s cp=%s out of review rounds",
-                                 run_id, cp.id)
-                    break
-                steps += self.revise(review.feedback)
+                continue
+            review = reviewer(cp, report.summary() if report.applicable
+                              else "no mechanical checks apply")
+            self.bb.send("user", f"[checkpoint {cp.id}] "
+                         + ("accepted" if review.accepted else f"revise: {review.feedback}"),
+                         kind=KIND_CONTROL)
+            if review.accepted:
+                self._settle(cp, accepted=True)
+                _log.info("CHECKPOINT run=%s cp=%s accepted", run_id, cp.id)
+                return steps, report
+            if last:
+                _log.warning("CHECKPOINT run=%s cp=%s out of review rounds", run_id, cp.id)
+                self._settle(cp, accepted=False)
+                return steps, report
+            steps += self.revise(review.feedback)
+            report = self.gate()
         return steps, report
 
     # -- steer ---------------------------------------------------------------
